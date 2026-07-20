@@ -8,6 +8,8 @@ from app.proxy.providers.base import (
     map_httpx_error,
     require_api_key,
 )
+from app.security.egress import assert_allowed_url
+from app.security.http import EgressCheckedAsyncClient
 
 OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
 
@@ -17,7 +19,8 @@ class OpenAIProvider(BaseLLMProvider):
 
     def __init__(self, settings: Settings) -> None:
         self._api_key = settings.openai_api_key
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+        self._client = EgressCheckedAsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+        assert_allowed_url(OPENAI_CHAT_URL)
 
     def _headers(self) -> dict[str, str]:
         api_key = require_api_key("openai", self._api_key)
@@ -27,6 +30,7 @@ class OpenAIProvider(BaseLLMProvider):
         }
 
     async def chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert_allowed_url(OPENAI_CHAT_URL)
         try:
             response = await self._client.post(
                 OPENAI_CHAT_URL,
@@ -42,6 +46,7 @@ class OpenAIProvider(BaseLLMProvider):
         self,
         payload: dict[str, Any],
     ) -> httpx.Response:
+        assert_allowed_url(OPENAI_CHAT_URL)
         stream_payload = {**payload, "stream": True}
         response: httpx.Response | None = None
         try:

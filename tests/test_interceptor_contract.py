@@ -3,7 +3,6 @@ import inspect
 from pathlib import Path
 
 import pytest
-
 from app.proxy.interceptor import intercept_outbound_request
 
 

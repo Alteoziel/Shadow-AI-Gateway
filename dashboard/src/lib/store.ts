@@ -1,14 +1,18 @@
 /**
  * Lightweight review store.
  *
- * Default: JSON file under .data/ (local / single-instance).
- * Optional: set DATABASE_URL to a Postgres connection string later
- * (Phase 3 of the gateway plan uses Supabase — same target).
+ * - Preferred: Upstash Redis (Vercel Marketplace → Upstash)
+ * - Fallback (local/dev): in-process memory
+ *
+ * Intentionally avoids filesystem persistence. Writing HTTP request bodies to
+ * disk (and later reading them into outbound fetch calls) is exactly the
+ * pattern CodeQL flags as js/http-to-file-access and js/file-access-to-http.
+ * Redis/memory keep the same API without that taint path.
  */
 
 import { createHash } from "crypto";
-import { promises as fs } from "fs";
-import path from "path";
+import { Redis } from "@upstash/redis";
+import { gradeCodingSubmission } from "./codingGrade";
 
 export type Severity = "info" | "warning" | "error" | "critical";
 
@@ -41,6 +45,17 @@ export type QuizQuestion = {
   choices: string[];
   answer_index: number;
   explanation: string;
+  question_type?: "multiple_choice" | "coding" | string;
+  language?: string;
+  starter_code?: string;
+  entrypoint?: string;
+  tests?: {
+    id?: string;
+    args: unknown[];
+    expected?: unknown;
+    raises?: string;
+  }[];
+  format?: string;
 };
 
 export type ComprehensionPack = {
@@ -95,23 +110,81 @@ export type Review = {
   comprehension_fingerprint?: string | null;
 };
 
-const DATA_DIR = path.join(process.cwd(), ".data");
-const STORE_PATH = path.join(DATA_DIR, "reviews.json");
+export type StoreStatus = {
+  backend: "redis" | "memory";
+  durable: boolean;
+  warning: string | null;
+};
 
-async function ensureStore(): Promise<Review[]> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
-    return JSON.parse(raw) as Review[];
-  } catch {
-    await fs.writeFile(STORE_PATH, "[]", "utf8");
-    return [];
-  }
+const REDIS_KEY = "governance:reviews";
+
+/** Process-local fallback when Redis is not configured (dev / single instance). */
+let memoryReviews: Review[] = [];
+
+function isVercel(): boolean {
+  return Boolean(process.env.VERCEL);
 }
 
-async function writeStore(reviews: Review[]): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(STORE_PATH, JSON.stringify(reviews, null, 2), "utf8");
+function redisClient(): Redis | null {
+  const url = (
+    process.env.UPSTASH_REDIS_REST_URL ||
+    process.env.KV_REST_API_URL ||
+    ""
+  ).trim();
+  const token = (
+    process.env.UPSTASH_REDIS_REST_TOKEN ||
+    process.env.KV_REST_API_TOKEN ||
+    ""
+  ).trim();
+  if (!url || !token) return null;
+  return new Redis({ url, token });
+}
+
+export function getStoreStatus(): StoreStatus {
+  if (redisClient()) {
+    return { backend: "redis", durable: true, warning: null };
+  }
+  if (isVercel()) {
+    return {
+      backend: "memory",
+      durable: false,
+      warning:
+        "Running on Vercel without Upstash Redis. Reviews stay in process memory and will not survive across serverless instances. Add Upstash Redis (Storage tab) and set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_*), then redeploy.",
+    };
+  }
+  return {
+    backend: "memory",
+    durable: false,
+    warning:
+      "Using in-memory store (local). Data resets when the process restarts. For durable quizzes on Vercel, attach Upstash Redis.",
+  };
+}
+
+async function readReviews(): Promise<Review[]> {
+  const redis = redisClient();
+  if (redis) {
+    const data = await redis.get<Review[] | string>(REDIS_KEY);
+    if (Array.isArray(data)) return data;
+    if (typeof data === "string") {
+      try {
+        const parsed = JSON.parse(data) as Review[];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+  return memoryReviews;
+}
+
+async function writeReviews(reviews: Review[]): Promise<void> {
+  const redis = redisClient();
+  if (redis) {
+    await redis.set(REDIS_KEY, reviews);
+    return;
+  }
+  memoryReviews = reviews;
 }
 
 export function extractComprehension(
@@ -128,7 +201,12 @@ export function comprehensionFingerprint(
 ): string | null {
   if (!pack?.questions?.length) return null;
   const material = pack.questions
-    .map((q) => `${q.id}:${q.prompt}:${q.choices.join("|")}`)
+    .map((q) => {
+      if (q.question_type === "coding") {
+        return `${q.id}:coding:${q.entrypoint}:${q.starter_code}:${JSON.stringify(q.tests)}`;
+      }
+      return `${q.id}:${q.prompt}:${(q.choices || []).join("|")}`;
+    })
     .join("\n");
   return createHash("sha256").update(material).digest("hex").slice(0, 16);
 }
@@ -168,19 +246,46 @@ export function sanitizeReviewForClient(review: Review): Review {
     comprehension: publicComprehension(
       review.comprehension
     ) as Review["comprehension"],
-    steps: sanitizeStepsForClient(review.steps),
+    steps: sanitizeStepsForClient(review.steps ?? []),
   };
 }
 
 export function gradeComprehension(
   pack: ComprehensionPack,
-  answers: Record<string, number>
-): ComprehensionAttempt {
-  const total = pack.questions.length;
+  answers: Record<string, number>,
+  codingSubmissions: Record<string, string> = {}
+): ComprehensionAttempt & {
+  coding?: Record<
+    string,
+    { passed: boolean; passedTests: number; totalTests: number; errors: string[] }
+  >;
+} {
+  const questions = pack.questions ?? [];
+  const total = questions.length;
   let correct = 0;
-  for (const q of pack.questions) {
-    if (answers[q.id] === q.answer_index) correct += 1;
+  const coding: Record<
+    string,
+    { passed: boolean; passedTests: number; totalTests: number; errors: string[] }
+  > = {};
+
+  for (const q of questions) {
+    if (q.question_type === "coding") {
+      const result = gradeCodingSubmission(
+        {
+          id: q.id,
+          question_type: "coding",
+          entrypoint: q.entrypoint || "solve",
+          tests: q.tests || [],
+        },
+        codingSubmissions[q.id] || ""
+      );
+      coding[q.id] = result;
+      if (result.passed) correct += 1;
+    } else if (answers[q.id] === q.answer_index) {
+      correct += 1;
+    }
   }
+
   const score = total ? correct / total : 0;
   const threshold = pack.pass_threshold ?? 0.8;
   return {
@@ -190,17 +295,28 @@ export function gradeComprehension(
     passed: score >= threshold,
     threshold,
     at: new Date().toISOString(),
+    coding,
   };
 }
 
 export async function listReviews(): Promise<Review[]> {
-  const reviews = await ensureStore();
-  return reviews.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  try {
+    const reviews = await readReviews();
+    return reviews.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch (err) {
+    console.error("[governance-store] listReviews failed", err);
+    return [];
+  }
 }
 
 export async function getReview(id: string): Promise<Review | null> {
-  const reviews = await ensureStore();
-  return reviews.find((r) => r.id === id) ?? null;
+  try {
+    const reviews = await readReviews();
+    return reviews.find((r) => r.id === id) ?? null;
+  } catch (err) {
+    console.error("[governance-store] getReview failed", err);
+    return null;
+  }
 }
 
 export async function upsertReview(
@@ -208,14 +324,12 @@ export async function upsertReview(
     status?: ReviewStatus;
   }
 ): Promise<Review> {
-  const reviews = await ensureStore();
+  const reviews = await readReviews();
   const now = new Date().toISOString();
   const comprehension = extractComprehension(payload.steps);
   const fingerprint = comprehensionFingerprint(comprehension);
-  // Always require comprehension when a pack exists; if missing, stay pending_comprehension
   const initialStatus: ReviewStatus =
-    payload.status ??
-    (comprehension ? "pending_comprehension" : "pending_comprehension");
+    payload.status ?? "pending_comprehension";
 
   const existingIdx = reviews.findIndex(
     (r) =>
@@ -244,10 +358,8 @@ export async function upsertReview(
     } else if (prev.status === "merged") {
       nextStatus = "merged";
     } else if (!sameQuiz) {
-      // New/changed quiz pack from CI → require comprehension again
       nextStatus = "pending_comprehension";
     } else if (prev.status === "approved" || prev.status === "rejected") {
-      // Same quiz — do not clobber a human decision on CI re-ingest
       nextStatus = prev.status;
     } else {
       nextStatus = keepPass ? "pending_review" : "pending_comprehension";
@@ -258,14 +370,13 @@ export async function upsertReview(
       ...payload,
       comprehension,
       comprehension_fingerprint: fingerprint,
-      // Reset quiz whenever the question pack changes (even on same commit / CI re-run)
       comprehension_passed: keepPass,
       comprehension_attempt: keepPass ? prev.comprehension_attempt : null,
       status: nextStatus,
       updatedAt: now,
     };
     reviews[existingIdx] = updated;
-    await writeStore(reviews);
+    await writeReviews(reviews);
     return updated;
   }
 
@@ -286,7 +397,7 @@ export async function upsertReview(
     comprehension_attempt: null,
   };
   reviews.unshift(review);
-  await writeStore(reviews);
+  await writeReviews(reviews);
   return review;
 }
 
@@ -294,7 +405,7 @@ export async function updateReview(
   id: string,
   patch: Partial<Review>
 ): Promise<Review | null> {
-  const reviews = await ensureStore();
+  const reviews = await readReviews();
   const idx = reviews.findIndex((r) => r.id === id);
   if (idx < 0) return null;
   reviews[idx] = {
@@ -302,6 +413,6 @@ export async function updateReview(
     ...patch,
     updatedAt: new Date().toISOString(),
   };
-  await writeStore(reviews);
+  await writeReviews(reviews);
   return reviews[idx];
 }
