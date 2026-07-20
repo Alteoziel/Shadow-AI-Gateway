@@ -2,7 +2,6 @@ import inspect
 from pathlib import Path
 
 import pytest
-
 from app.scrub import SCRUB_LATENCY_BUDGET_MS, ScrubRequest, scrub_prompt
 
 

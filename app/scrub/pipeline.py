@@ -1,6 +1,5 @@
 from app.scrub.types import ScrubRequest, ScrubResult
 
-
 SCRUB_LATENCY_BUDGET_MS = 100
 
 
