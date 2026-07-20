@@ -11,6 +11,9 @@ import {
   sanitizeReviewForClient,
 } from "@/lib/store";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 type Params = { params: Promise<{ id: string }> };
 
 export async function GET(_req: NextRequest, { params }: Params) {

@@ -5,15 +5,20 @@ import {
 } from "@/lib/auth";
 import { parseIngestBody } from "@/lib/ingest";
 import {
+  getStoreStatus,
   listReviews,
   upsertReview,
   sanitizeReviewForClient,
 } from "@/lib/store";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const reviews = await listReviews();
   return NextResponse.json({
     reviews: reviews.map(sanitizeReviewForClient),
+    store: getStoreStatus(),
   });
 }
 
