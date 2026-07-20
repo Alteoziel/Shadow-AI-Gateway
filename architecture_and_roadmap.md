@@ -1,11 +1,34 @@
 # Shadow AI Guardrail Gateway — Architecture & Roadmap
 
-> **THE LEDGER** — Single source of truth for all agents, humans, and reviewers.
-> Read this file before any developmental cycle. Keep it current when phase status changes.
+> ## THE LEDGER IS LAW
+>
+> This file is the **single source of truth** and the **binding constitution** for every
+> agent, subagent, reviewer, and human working in this repository.
+>
+> - If an instruction conflicts with The Ledger, **The Ledger wins**.
+> - If a model wants to "just quickly implement," **stop** and follow QRSPI + guardrails.
+> - If a Human Hands-On checkpoint is open, agents **must not** fill it.
+> - Read this file **before** any developmental cycle. Keep phase/checkpoint status current.
 
-**Last updated:** 2026-07-19  
+**Last updated:** 2026-07-20  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
-**Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)
+**Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
+**Task workflow:** **QRSPI is mandatory** — see §5 and [`.cursor/qrspi/`](.cursor/qrspi/)
+
+---
+
+## 0. Mandatory Preflight for Every Agent
+
+Before writing code or opening a PR, every parent agent MUST:
+
+1. Read **this entire Ledger** (at least skim all numbered sections; fully read §§0–2, §5, §8).
+2. Read [`.cursor/qrspi/README.md`](.cursor/qrspi/README.md), [`AUTONOMOUS_MODE.md`](.cursor/qrspi/AUTONOMOUS_MODE.md), and [`CONTEXT_ISOLATION.md`](.cursor/qrspi/CONTEXT_ISOLATION.md).
+3. Run the **QRSPI workflow** for the task using **fresh subagents per stage** (no shared chat history across stages).
+4. Pass each stage subagent **only** the artifact files allowed for that stage.
+5. Answer every former "ask the human" QRSPI gate **autonomously** with best grounded judgment (see Autonomous Mode).
+6. Never complete `TODO: Human Hands-On Implementation` blocks — those remain human-owned product checkpoints.
+
+**Refusal rule:** An agent that skips QRSPI, merges stage contexts, or violates The Ledger is operating out of process. Stop and restart correctly.
 
 ---
 
@@ -41,7 +64,9 @@ By project end, the human must truthfully claim:
 | **THE DOER / ACHIEVER** | Composer 2.5 / Auto 2.5 | Bulk file generation, boilerplate, configurations, baseline tests, refactoring. |
 | **THE SECURITY CHIEF** | GPT-5.6 Sol | Extreme edge cases only: data scrubbing perfection, pre-flight tokenization, cryptographic verification, exhaustive security test coverage. |
 
-**Default cycle:** Grok designs → Composer builds → Grok reviews → Human fills checkpoint → validation scripts run.
+**Default cycle:** Ledger preflight → QRSPI (isolated subagents, autonomous answers) → Composer implements plan → Grok reviews → Human fills product checkpoints → validation.
+
+> QRSPI autonomy does **not** override Human Hands-On product checkpoints.
 
 ---
 
@@ -150,20 +175,84 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 ---
 
-## 5. Operational Protocol (Every Developmental Cycle)
+## 5. Operational Protocol — QRSPI Is Mandatory
 
-1. **Design & Plan (Grok 4.5)** — Map file modifications. Define contracts, constraints, and the human checkpoint boundary.
-2. **Boilerplate (Composer / Auto 2.5)** — Generate structural code, configs, provider adapters, baseline tests. **Never** auto-complete human checkpoint implementations.
-3. **Establish Learning Checkpoint** — Before a core feature block is finished, inject a clear:
+### 5.1 Default developmental cycle
 
-   ```text
-   TODO: Human Hands-On Implementation
-   ```
+1. **Preflight** — Read The Ledger + `.cursor/qrspi/*` (§0).
+2. **QRSPI** — Run stages 1→8 via isolated subagents (details below).
+3. **Human product checkpoint** — If the work touches a `TODO: Human Hands-On Implementation` block, stop there; do not auto-complete it. Inject/keep cheat sheets.
+4. **Validation** — After human fills a checkpoint (or after autonomous non-checkpoint work), run tests / latency / security checks as required by phase.
 
-   block in the designated file.
-4. **Provide the Cheat Sheet** — Accompany the checkpoint with a concise **3-bullet** conceptual breakdown of *why* the underlying engineering concept works.
-5. **Human Implements** — Engineering Manager fills the checkpoint.
-6. **Security & Latency Validation** — After human completion, run validation scripts for structural security and (from Phase 2 onward) the sub-100ms processing budget.
+### 5.2 QRSPI workflow (law)
+
+Canonical playbooks: [`.cursor/qrspi/`](.cursor/qrspi/)
+
+| Stage | Playbook | Writes | Subagent inputs (ONLY) |
+|-------|----------|--------|-------------------------|
+| 1 Question | `1_question.md` | `task.md`, `questions.md` | Task / ticket + Ledger |
+| 2 Research | `2_research.md` | `research.md` | **`questions.md` only** (never `task.md`) |
+| 3 Design | `3_design.md` | `design.md` | `task.md`, `questions.md`, `research.md` |
+| 4 Structure | `4_structure.md` | `structure.md` | `design.md`, `research.md` |
+| 5 Plan | `5_plan.md` | `plan.md` | `structure.md`, `design.md`, `research.md` |
+| 6 Worktree | `6_worktree.md` | isolated branch/worktree | artifact dir + `plan.md` |
+| 7 Implement | `7_implement.md` | code + checked `plan.md` | **`plan.md` primary** |
+| 8 PR | `8_pr.md` | PR | `design.md` + diff/commits |
+
+Helper subagents (spawn inside stages as directed): [`.cursor/qrspi/agents/`](.cursor/qrspi/agents/)
+(`codebase-locator`, `codebase-analyzer`, `codebase-pattern-finder`, `web-search-researcher`).
+
+Artifacts live under `thoughts/qrspi/<YYYY-MM-DD-brief-description>/`.
+
+```mermaid
+flowchart TD
+  Parent[Parent orchestrator reads Ledger] --> Q[Stage1 Question fresh subagent]
+  Q --> R[Stage2 Research fresh subagent]
+  R --> D[Stage3 Design fresh subagent]
+  D --> S[Stage4 Structure fresh subagent]
+  S --> P[Stage5 Plan fresh subagent]
+  P --> W[Stage6 Worktree or feature branch]
+  W --> I[Stage7 Implement fresh subagent]
+  I --> PR[Stage8 PR]
+```
+
+### 5.3 Autonomous Mode (no QRSPI human gates)
+
+See [`.cursor/qrspi/AUTONOMOUS_MODE.md`](.cursor/qrspi/AUTONOMOUS_MODE.md).
+
+- Original QRSPI "wait for user / approve design" steps are **disabled**.
+- The stage agent must still enumerate design options, then **pick the best answer** and record rationale (`## Autonomous Decisions` / `## Autonomous Assumptions`).
+- Proceed without blocking on humans.
+- **Exception:** Human Hands-On **product** checkpoints remain blocked for agents. QRSPI autonomy ≠ permission to implement those TODOs.
+
+### 5.4 Context isolation (non-negotiable)
+
+See [`.cursor/qrspi/CONTEXT_ISOLATION.md`](.cursor/qrspi/CONTEXT_ISOLATION.md).
+
+- **Fresh subagent per QRSPI stage** — do not `resume` a prior stage agent for a later stage.
+- **No shared chat history** across stages — disk artifacts are the only bridge.
+- **File allowlists** — pass only the inputs in §5.2; Research must never see `task.md`.
+- **Anti-pattern ban:** one mega-agent doing Question→Implement in a single context.
+
+### 5.5 Agent hierarchy inside QRSPI
+
+| Role | Model | QRSPI usage |
+|------|-------|-------------|
+| THE BRAIN | Opus 4.8 | Only on explicit architectural impasse — not routine QRSPI |
+| SENIOR ENGINEER | Grok 4.5 | Orchestrates QRSPI, reviews artifacts, enforces Ledger |
+| THE DOER | Composer / Auto 2.5 | Stage 7 implement + boilerplate inside plan bounds |
+| SECURITY CHIEF | GPT-5.6 Sol | Extreme security/crypto edge cases only |
+
+Orchestrators should spawn QRSPI stage runners as general-purpose / explore subagents with the playbook + allowlisted files pasted into the prompt.
+
+### 5.6 Learning checkpoints (product, not QRSPI)
+
+Separately from QRSPI gates, before a core pillar feature is auto-completed:
+
+1. Inject `TODO: Human Hands-On Implementation`
+2. Provide a 3-bullet cheat sheet
+3. Leave `NotImplementedError` (or equivalent) until the human implements
+4. Validate after human completion
 
 ---
 
@@ -194,7 +283,16 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 ```text
 /
-├── architecture_and_roadmap.md          # THIS FILE — The Ledger
+├── architecture_and_roadmap.md          # THIS FILE — The Ledger (LAW)
+├── .cursor/
+│   └── qrspi/                           # Mandatory QRSPI playbooks
+│       ├── README.md
+│       ├── AUTONOMOUS_MODE.md
+│       ├── CONTEXT_ISOLATION.md
+│       ├── 1_question.md … 8_pr.md
+│       └── agents/                      # locator / analyzer / pattern / web
+├── thoughts/
+│   └── qrspi/                           # Per-task QRSPI artifacts
 ├── README.md
 ├── .env.example
 ├── .gitignore
@@ -235,14 +333,18 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 ## 8. Non-Negotiable Guardrails
 
-1. **No Vercel for the streaming proxy** — use Docker on Fly.io, Render, or (Phase 4) AWS ECS for long-lived async streaming.
-2. **Sub-100ms scrub budget** applies from Phase 2 onward; measure and enforce with validation scripts.
-3. **Never auto-complete human checkpoint blocks** — agents scaffold, document, and test contracts only.
-4. **Secrets only via environment variables** — never commit API keys or `.env` files.
-5. **The Ledger stays current** — update phase/checkpoint status in this file whenever status changes.
-6. **Supabase PostgreSQL** is the production database target (Phase 3); do not invent a parallel primary store.
-7. **Bugbot** is integrated for GitHub issue tracking; treat review findings as first-class work items.
-8. **Opus 4.8 and GPT-5.6 Sol** are restricted roles — do not invoke without explicit instruction.
+1. **The Ledger is law** — conflicting agent instincts lose; update The Ledger deliberately when process changes.
+2. **QRSPI is mandatory** for developmental tasks — playbooks under `.cursor/qrspi/`; artifacts under `thoughts/qrspi/`.
+3. **Fresh subagent per QRSPI stage** — no shared chat history; file allowlists only; Research never reads `task.md`.
+4. **Autonomous QRSPI gates** — agents answer design/plan questions themselves; do not block on humans for QRSPI approvals.
+5. **Never auto-complete human product checkpoint blocks** — scaffold + cheat sheet only.
+6. **No Vercel for the streaming proxy** — Docker on Fly.io, Render, or (Phase 4) AWS ECS.
+7. **Sub-100ms scrub budget** from Phase 2 onward — measure and enforce with validation scripts.
+8. **Secrets only via environment variables** — never commit API keys or `.env` files.
+9. **The Ledger stays current** — update phase/checkpoint status whenever status changes.
+10. **Supabase PostgreSQL** is the production database target (Phase 3); do not invent a parallel primary store.
+11. **Bugbot** findings are first-class work items.
+12. **Opus 4.8 and GPT-5.6 Sol** are restricted roles — do not invoke without explicit instruction.
 
 ---
 
@@ -261,4 +363,5 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-07-20 | Mandated QRSPI for all agents; installed `.cursor/qrspi/` playbooks; Autonomous Mode (no human QRSPI gates); Context Isolation law; Ledger elevated to constitution | Senior Engineer (Grok 4.5) |
 | 2026-07-19 | Initial Ledger created; Phase 1 scaffold kicked off; Checkpoint #1 armed | Senior Engineer (Grok 4.5) |

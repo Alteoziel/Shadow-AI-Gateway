@@ -2,7 +2,8 @@
 
 Enterprise security proxy that sits between corporate users and public LLMs (OpenAI / Anthropic) to intercept outbound traffic **pre-flight**.
 
-> **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger** — single source of truth for phases, checkpoints, and guardrails.
+> **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger (LAW)** — phases, checkpoints, guardrails.  
+> **Task process:** [`.cursor/qrspi/`](.cursor/qrspi/) — **mandatory QRSPI** with autonomous stage answers and isolated subagents (see `AUTONOMOUS_MODE.md` + `CONTEXT_ISOLATION.md`).
 
 ## Phase 1 status
 
