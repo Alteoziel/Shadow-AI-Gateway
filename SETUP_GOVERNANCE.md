@@ -20,15 +20,21 @@ You cannot take the UI quiz from the Actions log alone. CI builds the quiz, then
 
 Bring `governance/`, `.github/workflows/ai-guardrail.yml`, and `dashboard/` onto `main`.
 
-## 2. Require the CI check (the important one)
+## 2. Require the CI checks (the important ones)
 
 GitHub → **Settings → Branches** → protect `main`:
 
 1. Require a pull request before merging
-2. Require status checks to pass → select **`Governance Steps 1–6`**
+2. Require status checks to pass → select **both**:
+   - **`Governance Steps 1–6`** (automated suite)
+   - **`Governance Quiz`** (you passed the dashboard quiz for this commit)
 3. Optionally keep Vercel + Bugbot required as well
 
-Until this is on, the workflow is advisory only — PRs can still merge without it.
+Until these are required, PRs can still merge without understanding the change.
+
+**How `Governance Quiz` works:** CI sets the check to **pending** when the suite runs. After you pass the quiz (≥80%) on the dashboard, the dashboard flips that same check to **success** for the PR head SHA. A new push resets it to pending until you pass again.
+
+For the dashboard to update the check, Vercel needs a GitHub token with **Commit statuses: Read and write** (fine-grained) or classic `repo` scope — set as `GITHUB_TOKEN`, `GH_MERGE_TOKEN`, or `GH_STATUS_TOKEN`.
 
 ## 3. (Optional) Enable LLM enrichment (Steps 2 + 6)
 

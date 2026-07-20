@@ -19,6 +19,7 @@ from governance.reporters import (
     format_markdown,
     post_github_pr_comment,
     post_inline_comments,
+    post_quiz_commit_status,
     post_to_dashboard,
 )
 from governance.steps import comprehension_gate
@@ -135,6 +136,23 @@ def run(
             )
         else:
             console.print("Dashboard updated.")
+
+    # Always try to open/refresh the branch-protection quiz check on this SHA.
+    # Dashboard flips it to success after the human passes (≥80%).
+    quiz_status = post_quiz_commit_status(report, state="pending")
+    if quiz_status is None:
+        console.print(
+            "Governance Quiz check skipped (need GITHUB_TOKEN + repo + commit SHA)."
+        )
+    elif quiz_status.get("ok") is False:
+        console.print(
+            f"[yellow]Governance Quiz check failed (non-blocking): "
+            f"{quiz_status.get('error')}[/yellow]"
+        )
+    else:
+        console.print(
+            "Governance Quiz check set to pending — pass the dashboard quiz to clear it."
+        )
 
     if fail_on_error and not report.passed:
         raise typer.Exit(code=1)

@@ -3,7 +3,11 @@ import {
   authorizeReviewer,
   unauthorizedResponse,
 } from "@/lib/auth";
-import { buildPullMergeUrl } from "@/lib/github";
+import {
+  buildPullMergeUrl,
+  dashboardReviewUrl,
+  setGovernanceQuizStatus,
+} from "@/lib/github";
 import {
   getReview,
   updateReview,
@@ -73,6 +77,16 @@ export async function POST(req: NextRequest, { params }: Params) {
       reviewer_note: note,
     });
 
+    const quizStatus = await setGovernanceQuizStatus({
+      repo: review.repo,
+      commitSha: review.commit_sha,
+      state: attempt.passed ? "success" : "failure",
+      description: attempt.passed
+        ? `Quiz passed (${attempt.correct}/${attempt.total}).`
+        : `Quiz failed (${attempt.correct}/${attempt.total}) — retake required.`,
+      targetUrl: dashboardReviewUrl(id),
+    });
+
     // Teach with explanations, but never leak expected_index (anti-cheat)
     const explanations = review.comprehension.questions.map((q) => ({
       id: q.id,
@@ -84,6 +98,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       review: updated ? sanitizeReviewForClient(updated) : null,
       attempt,
       explanations,
+      quiz_status: quizStatus,
     });
   }
 
