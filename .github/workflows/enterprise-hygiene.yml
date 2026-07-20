@@ -151,9 +151,9 @@ jobs:
           output_format: cli
           config_file: infra/terraform/.checkov.yml
 
-  # Analyzes on every PR. Upload to GitHub Code Scanning requires enabling
-  # Code scanning in repo Settings (private repos may need GHAS). Until then
-  # upload stays false so the required check can stay green; SARIF is artifacted.
+  # Code scanning is enabled on this private repo — upload SARIF to GitHub.
+  # If upload ever fails with "Code scanning is not enabled", re-check
+  # Settings → Code security → Code scanning, then keep upload: true.
   codeql:
     name: CodeQL (Layer C)
     runs-on: ubuntu-latest
@@ -175,8 +175,7 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@b7351df727350dca84cb9d725d57dcf5bc82ba26 # v3
         with:
-          # Flip to true after: Settings → Code security → Code scanning enabled.
-          upload: false
+          upload: true
       - name: Upload CodeQL SARIF artifact
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

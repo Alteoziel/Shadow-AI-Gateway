@@ -356,6 +356,7 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 | 2026-07-20 | Inserted Step 6 Comprehension Gate (beginner quiz); human review panel becomes Step 7; merge locked until ≥80% | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Landed Enterprise Layers B–E (Dependabot, Gitleaks, Ruff/Mypy/Semgrep/CodeQL, coverage floor, egress/audit, Trivy, Terraform+Checkov) | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Hardened Layers B–E: SHA-pinned Actions, checksummed Gitleaks, Semgrep packs hard-fail, Trivy CRITICAL+HIGH + SBOM, CodeQL upload, `EgressCheckedAsyncClient`, non-root image, coverage ≥60% | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Operator: Dependabot + Code scanning enabled; Protect Main tightened (strict checks, last-push approval, signed commits); CodeQL `upload: true` | Human + Senior Engineer |
 
 ---
 
@@ -377,15 +378,18 @@ Without these steps, the suite runs in CI but GitHub will still allow merges on 
 
 ### B. Branch protection on `main` (critical)
 
-Prefer the **Protect Main** ruleset (already active). Verify it still requires:
+Prefer the **Protect Main** ruleset (already active). It requires:
 
 1. Pull request before merging
 2. Status checks: **`Governance Steps 1–6`**, **`Enterprise Layers B–E`**, **`CodeQL (Layer C)`**
 3. **Require review from Code Owners**
 4. **Dismiss stale reviews** on new pushes
-5. No casual admin bypass
+5. **Require approval of the most recent reviewable push**
+6. **Branches up to date** before merging
+7. **Signed commits**
+8. CodeQL code-scanning gate + Preview deployment
 
-Still do yourself (see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md)): secret scanning + push protection, Dependabot alerts, strict up-to-date branches, require approval of most recent push, signed commits, and a second CODEOWNER when you have a teammate.
+Still optional (see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md)): secret scanning + push protection (confirm on), second CODEOWNER when you have a teammate, governance dashboard deploy. **Dependabot alerts/security updates** and **Code scanning** are enabled.
 
 **Also enforce comprehension in practice:** even with CI green, use the dashboard’s Step 6 quiz before merge — Approve & Merge stays locked until you pass (≥80%).
 
