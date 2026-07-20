@@ -128,13 +128,6 @@ function redisClient(): Redis | null {
   return new Redis({ url, token });
 }
 
-function assertServerlessStoreReady(): void {
-  // On Vercel, memory is not shared across lambdas — Redis is required.
-  if (process.env.VERCEL && !redisClient()) {
-    throw new Error(
-      "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required on Vercel. " +
-        "Add Upstash Redis from the Vercel Marketplace (Storage tab), then redeploy."
-    );
 export function getStoreStatus(): StoreStatus {
   if (redisClient()) {
     return { backend: "redis", durable: true, warning: null };
@@ -158,11 +151,6 @@ export function getStoreStatus(): StoreStatus {
 async function readReviews(): Promise<Review[]> {
   const redis = redisClient();
   if (redis) {
-    const data = await redis.get<Review[]>(REDIS_KEY);
-    return Array.isArray(data) ? data : [];
-  }
-
-  assertServerlessStoreReady();
     const data = await redis.get<Review[] | string>(REDIS_KEY);
     if (Array.isArray(data)) return data;
     if (typeof data === "string") {
@@ -184,8 +172,6 @@ async function writeReviews(reviews: Review[]): Promise<void> {
     await redis.set(REDIS_KEY, reviews);
     return;
   }
-
-  assertServerlessStoreReady();
   memoryReviews = reviews;
 }
 
