@@ -97,6 +97,7 @@ export type Review = {
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const STORE_PATH = path.join(DATA_DIR, "reviews.json");
+export const REVIEW_STORE_PATH = ".data/reviews.json";
 
 async function ensureStore(): Promise<Review[]> {
   await fs.mkdir(DATA_DIR, { recursive: true });

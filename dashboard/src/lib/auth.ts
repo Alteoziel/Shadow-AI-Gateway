@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export type DashboardAuthStatus = {
+  production: boolean;
+  dashboardSecretConfigured: boolean;
+  reviewerSecretConfigured: boolean;
+  reviewerUsesDashboardSecret: boolean;
+  insecureDevAllowed: boolean;
+  mergeTokenConfigured: boolean;
+  ingestHeader: "X-Governance-Secret";
+  reviewerHeader: "X-Governance-Reviewer-Secret";
+};
+
 /**
  * Ingest/review auth for the governance dashboard.
  *
@@ -14,6 +25,24 @@ export function isInsecureDevAllowed(): boolean {
 
 export function dashboardSecretConfigured(): boolean {
   return Boolean(process.env.GOVERNANCE_DASHBOARD_SECRET?.trim());
+}
+
+export function dashboardAuthStatus(): DashboardAuthStatus {
+  const reviewerSecretConfigured = Boolean(
+    process.env.GOVERNANCE_REVIEWER_SECRET?.trim()
+  );
+  return {
+    production: process.env.NODE_ENV === "production",
+    dashboardSecretConfigured: dashboardSecretConfigured(),
+    reviewerSecretConfigured,
+    reviewerUsesDashboardSecret: !reviewerSecretConfigured,
+    insecureDevAllowed: isInsecureDevAllowed(),
+    mergeTokenConfigured: Boolean(
+      process.env.GITHUB_TOKEN?.trim() || process.env.GH_MERGE_TOKEN?.trim()
+    ),
+    ingestHeader: "X-Governance-Secret",
+    reviewerHeader: "X-Governance-Reviewer-Secret",
+  };
 }
 
 export function authorizeIngest(req: NextRequest): boolean {
