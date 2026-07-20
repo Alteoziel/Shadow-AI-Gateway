@@ -62,7 +62,26 @@ Tone: supportive teacher for a beginner, not a gotcha trap. Wrong answers show e
 
 ### Required human setup (for the gate to actually protect `main`)
 
-See **§11 Setup Checklist** below. Until branch protection requires the `Governance Steps 1–6` check, PRs can still merge without it.
+See **§11 Setup Checklist** below. Require status checks:
+
+- **`Governance Steps 1–6`**
+- **`Enterprise Layers B–E`** (Dependabot/gitleaks/ruff/mypy/semgrep/tests/trivy/checkov — see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md))
+- **`CodeQL (Layer C)`** after it appears once
+
+Until those are required, workflows are advisory only.
+
+---
+
+## 0b. Enterprise Layers B–E (additive)
+
+| Layer | Focus | Automations in repo |
+|-------|-------|---------------------|
+| B | Supply chain & secrets | Dependabot, Gitleaks, pip-audit, npm audit |
+| C | Static analysis | Ruff, Mypy, Semgrep, CodeQL, CODEOWNERS |
+| D | Product tests | API integration tests, egress/audit contracts, coverage ≥45% |
+| E | Ship & runtime | Egress allowlist, audit DDL scaffold, Trivy image scan, Terraform+Checkov |
+
+Details: [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
 ---
 
@@ -261,7 +280,10 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 ├── render.yaml
 ├── docker-compose.yml
 ├── .github/workflows/
-│   └── ai-guardrail.yml                 # Pre-merge governance CI
+│   ├── ai-guardrail.yml                 # Pre-merge governance CI
+│   └── enterprise-hygiene.yml           # Layers B–E (supply chain → ship)
+├── .github/dependabot.yml               # Layer B
+├── .github/CODEOWNERS                   # Layer C
 ├── app/                                 # Gateway service
 │   ├── main.py
 │   ├── config.py
@@ -269,9 +291,11 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 │   ├── proxy/
 │   │   ├── interceptor.py               # ★ HUMAN CHECKPOINT #1
 │   │   └── providers/...
+│   ├── security/                        # Layer E egress + audit scaffold
 │   └── models/...
-├── tests/                               # Gateway tests
-├── governance/                          # Steps 1–5 (Python CLI)
+├── infra/terraform/                     # Layer E IaC stub (+ Checkov)
+├── tests/                               # Gateway tests (Layer D)
+├── governance/                          # Steps 1–6 (Python CLI)
 │   ├── pyproject.toml
 │   ├── README.md
 │   ├── governance/
@@ -318,7 +342,8 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 | Async enterprise API proxy / pre-flight intercept | 1 | `app/proxy/interceptor.py` |
 | Localized PII scrubbing pipeline (&lt;100ms) | 2 | Scrubbing loop (TBD path) |
 | PostgreSQL metrics & audit trails | 3 | Schema + insert path (TBD) |
-| Docker + Terraform private cloud hosting | 4 | `Dockerfile` + `main.tf` (TBD) |
+| Docker + Terraform private cloud hosting | 4 | `Dockerfile` + `infra/terraform/main.tf` (stub landed; expand in Phase 4) |
+| Egress allowlist / audit trail readiness | 1→3 | `app/security/egress.py`, `app/security/audit.py` |
 
 ---
 
@@ -329,6 +354,7 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 | 2026-07-19 | Initial Ledger created; Phase 1 scaffold kicked off; Checkpoint #1 armed | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Added §0 Pre-Merge Gate; scaffolded Steps 1–6 (`governance/`, CI workflow, `dashboard/`); §11 setup checklist | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Inserted Step 6 Comprehension Gate (beginner quiz); human review panel becomes Step 7; merge locked until ≥80% | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Landed Enterprise Layers B–E (Dependabot, Gitleaks, Ruff/Mypy/Semgrep/CodeQL, coverage floor, egress/audit, Trivy, Terraform+Checkov) | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -353,11 +379,12 @@ Without these steps, the suite runs in CI but GitHub will still allow merges on 
 GitHub → **Settings → Branches → Branch protection rule** for `main`:
 
 1. Require a pull request before merging
-2. Require status checks to pass → enable **`Governance Steps 1–6`**
-3. (Recommended) Do **not** allow bypassing for admins while learning the workflow
-4. Keep existing Vercel + Bugbot checks if desired — they stay complementary
+2. Require status checks to pass → enable **`Governance Steps 1–6`** and **`Enterprise Layers B–E`** (add **`CodeQL (Layer C)`** after it appears once)
+3. (Recommended) Enable **Require review from Code Owners** (uses `.github/CODEOWNERS`)
+4. (Recommended) Do **not** allow bypassing for admins while learning the workflow
+5. Keep existing Vercel + Bugbot checks if desired — they stay complementary
 
-Until step 2 is enabled, the governance workflow is advisory only.
+Until step 2 is enabled, the governance / hygiene workflows are advisory only.
 
 **Also enforce comprehension in practice:** even with CI green, use the dashboard’s Step 6 quiz before merge — Approve & Merge stays locked until you pass (≥80%).
 

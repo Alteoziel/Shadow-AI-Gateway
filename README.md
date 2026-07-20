@@ -15,12 +15,15 @@ Before more gateway code ships, PRs are analyzed by a seven-step suite:
 | CLI (Steps 1–6) | [`governance/`](governance/) |
 | GitHub Action | [`.github/workflows/ai-guardrail.yml`](.github/workflows/ai-guardrail.yml) |
 | Review panel (Step 7) | [`dashboard/`](dashboard/) |
+| **Enterprise Layers B–E** | [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md) + [`.github/workflows/enterprise-hygiene.yml`](.github/workflows/enterprise-hygiene.yml) |
 | Human setup checklist | Ledger **§11** + [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) |
 
 ```bash
 cd governance && pip install -e ".[dev]" && ai-guardrail run --root ..
 ai-guardrail quiz --root .. --skip-llm   # practice understanding the change
 ```
+
+Require both status checks on `main`: **`Governance Steps 1–6`** and **`Enterprise Layers B–E`**.
 
 ## Phase 1 status
 

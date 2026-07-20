@@ -1,0 +1,35 @@
+# Semgrep rules — Layer C (beyond regex OWASP)
+# Runs in CI via official Semgrep action; keep custom rules minimal and high-signal.
+
+rules:
+  - id: shadow-ai.no-hardcoded-provider-keys
+    languages: [python]
+    severity: ERROR
+    message: Hardcoded LLM provider API key detected. Use environment variables.
+    patterns:
+      - pattern-either:
+          - pattern: $X = "sk-..."
+          - pattern: $X = "sk-proj-..."
+          - pattern: OPENAI_API_KEY = "..."
+          - pattern: ANTHROPIC_API_KEY = "..."
+    paths:
+      exclude:
+        - tests/**
+        - governance/tests/**
+
+  - id: shadow-ai.interceptor-must-be-awaited
+    languages: [python]
+    severity: WARNING
+    message: Call intercept_outbound_request with await (async choke point).
+    patterns:
+      - pattern: intercept_outbound_request(...)
+      - pattern-not: await intercept_outbound_request(...)
+    paths:
+      include:
+        - app/**
+
+  - id: shadow-ai.no-shell-true
+    languages: [python]
+    severity: ERROR
+    message: subprocess with shell=True is forbidden in the gateway.
+    pattern: subprocess.$FN(..., shell=True, ...)

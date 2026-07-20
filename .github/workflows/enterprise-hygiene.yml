@@ -1,0 +1,132 @@
+name: Enterprise Hygiene (Layers B–E)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  hygiene:
+    name: Enterprise Layers B–E
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install gateway (dev)
+        run: |
+          python -m pip install -U "pip>=25.3"
+          pip install -e ".[dev]"
+
+      # ── Layer B: secrets + dependency audit ─────────────────────────
+      - name: "B · Gitleaks secret scan"
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "B · pip-audit (gateway)"
+        run: pip-audit --progress-spinner off
+
+      - name: "B · pip-audit (governance)"
+        working-directory: governance
+        run: |
+          python -m pip install -U "pip>=25.3"
+          pip install -e ".[dev]"
+          pip-audit --progress-spinner off
+
+      - name: "B · npm audit (dashboard)"
+        working-directory: dashboard
+        # High/critical only; advisory findings should not block the learning PR.
+        continue-on-error: true
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+      # ── Layer C: lint, types, SAST ──────────────────────────────────
+      - name: "C · Ruff"
+        run: ruff check app tests
+
+      - name: "C · Mypy"
+        run: mypy app
+
+      - name: "C · Semgrep"
+        run: |
+          pip install semgrep
+          semgrep scan \
+            --config .semgrep.yml \
+            --error \
+            --metrics off \
+            app tests
+          # Pack rules are informational in first land; custom rules above are hard-fail.
+          semgrep scan \
+            --config p/python \
+            --config p/owasp-top-ten \
+            --metrics off \
+            app tests || true
+
+      # ── Layer D: product tests + coverage ───────────────────────────
+      - name: "D · Pytest + coverage floor"
+        run: pytest -q
+
+      # ── Layer E: container + IaC ────────────────────────────────────
+      - name: "E · Build gateway image"
+        run: docker build -t shadow-ai-gateway:ci .
+
+      - name: "E · Trivy image scan"
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: shadow-ai-gateway:ci
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      - name: "E · Checkov (Terraform)"
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra/terraform
+          framework: terraform
+          soft_fail: false
+          output_format: cli
+          config_file: infra/terraform/.checkov.yml
+
+  codeql:
+    name: CodeQL (Layer C)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-extended
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

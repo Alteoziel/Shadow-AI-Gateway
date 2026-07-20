@@ -1,0 +1,13 @@
+# CODEOWNERS — Layer C (who must review sensitive paths)
+# Replace @Alteoziel with additional teammates as the team grows.
+# Enable "Require review from Code Owners" in branch protection for enforcement.
+
+*                               @Alteoziel
+
+# Security-critical surfaces
+/app/proxy/                     @Alteoziel
+/app/security/                  @Alteoziel
+/governance/                    @Alteoziel
+/.github/workflows/             @Alteoziel
+/infra/                         @Alteoziel
+/architecture_and_roadmap.md    @Alteoziel
