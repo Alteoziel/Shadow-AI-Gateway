@@ -60,8 +60,9 @@
 |-------|------------------|
 | Local practice | `cd governance && ai-guardrail quiz --root .. --skip-llm` |
 | Dashboard (Step 7) | Deploy `dashboard/`, open it after CI POSTs the report → read guide → submit quiz (≥80%) → Approve & Merge unlocks |
+| GitHub check **`Governance Quiz`** | CI sets **pending**; dashboard sets **success** after ≥80% — require this under branch protection |
 
-Until the dashboard is deployed (`GOVERNANCE_DASHBOARD_URL` + secrets), practice with the local `quiz` command. Branch protection still requires the Actions check to be green.
+Until the dashboard is deployed (`GOVERNANCE_DASHBOARD_URL` + secrets), practice with the local `quiz` command. Branch protection should require both **`Governance Steps 1–6`** and **`Governance Quiz`**.
 
 ### Agent preflight (before coding)
 
@@ -74,10 +75,11 @@ Until the dashboard is deployed (`GOVERNANCE_DASHBOARD_URL` + secrets), practice
 See **§11 Setup Checklist** below. Require status checks:
 
 - **`Governance Steps 1–6`**
+- **`Governance Quiz`** (dashboard flips pending → success after ≥80%)
 - **`Enterprise Layers B–E`** (Dependabot/gitleaks/ruff/mypy/semgrep/tests/trivy/checkov — see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md))
 - **`CodeQL (Layer C)`** after it appears once
 
-Protect Main ruleset now requires those three checks + Code Owner review + dismiss stale reviews. Remaining operator steps (secret push protection, signed commits, second reviewer, etc.) are listed in [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
+Protect Main ruleset should include **`Governance Quiz`** once it has appeared on a PR (GitHub only lists checks that have run at least once). Remaining operator steps (secret push protection, signed commits, second reviewer, etc.) are listed in [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
 ---
 
@@ -451,7 +453,7 @@ Without these steps, the suite runs in CI but GitHub will still allow merges on 
 Prefer the **Protect Main** ruleset (already active). It requires:
 
 1. Pull request before merging
-2. Status checks: **`Governance Steps 1–6`**, **`Enterprise Layers B–E`**, **`CodeQL (Layer C)`**
+2. Status checks: **`Governance Steps 1–6`**, **`Governance Quiz`**, **`Enterprise Layers B–E`**, **`CodeQL (Layer C)`**
 3. **Require review from Code Owners**
 4. **Dismiss stale reviews** on new pushes
 5. **Require approval of the most recent reviewable push**
@@ -461,7 +463,9 @@ Prefer the **Protect Main** ruleset (already active). It requires:
 
 Still optional (see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md)): secret scanning + push protection (confirm on), second CODEOWNER when you have a teammate, governance dashboard deploy. **Dependabot alerts/security updates** and **Code scanning** are enabled.
 
-**Also enforce comprehension in practice:** even with CI green, use the dashboard’s Step 6 quiz before merge — Approve & Merge stays locked until you pass (≥80%).
+**Also enforce comprehension:** require the **`Governance Quiz`** status check (set
+to success by the dashboard after ≥80%). Approve & Merge in the UI stays locked
+until you pass as well.
 
 ### C. Deploy the Step 7 dashboard (Vercel)
 

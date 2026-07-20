@@ -1,16 +1,18 @@
 /**
  * Lightweight review store.
  *
- * - Preferred: Upstash Redis / Vercel KV (durable on serverless)
+ * - Preferred: Upstash Redis (Vercel Marketplace → Upstash)
  * - Fallback (local/dev): in-process memory
  *
  * Intentionally avoids filesystem persistence. Writing HTTP request bodies to
- * disk (and later reading them into outbound fetch calls) is the pattern
- * CodeQL flags as js/http-to-file-access and js/file-access-to-http.
+ * disk (and later reading them into outbound fetch calls) is exactly the
+ * pattern CodeQL flags as js/http-to-file-access and js/file-access-to-http.
+ * Redis/memory keep the same API without that taint path.
  */
 
 import { createHash } from "crypto";
 import { Redis } from "@upstash/redis";
+import { gradeCodingSubmission } from "./codingGrade";
 
 export type Severity = "info" | "warning" | "error" | "critical";
 
@@ -43,6 +45,17 @@ export type QuizQuestion = {
   choices: string[];
   answer_index: number;
   explanation: string;
+  question_type?: "multiple_choice" | "coding" | string;
+  language?: string;
+  starter_code?: string;
+  entrypoint?: string;
+  tests?: {
+    id?: string;
+    args: unknown[];
+    expected?: unknown;
+    raises?: string;
+  }[];
+  format?: string;
 };
 
 export type ComprehensionPack = {
@@ -188,7 +201,12 @@ export function comprehensionFingerprint(
 ): string | null {
   if (!pack?.questions?.length) return null;
   const material = pack.questions
-    .map((q) => `${q.id}:${q.prompt}:${q.choices.join("|")}`)
+    .map((q) => {
+      if (q.question_type === "coding") {
+        return `${q.id}:coding:${q.entrypoint}:${q.starter_code}:${JSON.stringify(q.tests)}`;
+      }
+      return `${q.id}:${q.prompt}:${(q.choices || []).join("|")}`;
+    })
     .join("\n");
   return createHash("sha256").update(material).digest("hex").slice(0, 16);
 }
@@ -234,13 +252,40 @@ export function sanitizeReviewForClient(review: Review): Review {
 
 export function gradeComprehension(
   pack: ComprehensionPack,
-  answers: Record<string, number>
-): ComprehensionAttempt {
-  const total = pack.questions.length;
+  answers: Record<string, number>,
+  codingSubmissions: Record<string, string> = {}
+): ComprehensionAttempt & {
+  coding?: Record<
+    string,
+    { passed: boolean; passedTests: number; totalTests: number; errors: string[] }
+  >;
+} {
+  const questions = pack.questions ?? [];
+  const total = questions.length;
   let correct = 0;
-  for (const q of pack.questions) {
-    if (answers[q.id] === q.answer_index) correct += 1;
+  const coding: Record<
+    string,
+    { passed: boolean; passedTests: number; totalTests: number; errors: string[] }
+  > = {};
+
+  for (const q of questions) {
+    if (q.question_type === "coding") {
+      const result = gradeCodingSubmission(
+        {
+          id: q.id,
+          question_type: "coding",
+          entrypoint: q.entrypoint || "solve",
+          tests: q.tests || [],
+        },
+        codingSubmissions[q.id] || ""
+      );
+      coding[q.id] = result;
+      if (result.passed) correct += 1;
+    } else if (answers[q.id] === q.answer_index) {
+      correct += 1;
+    }
   }
+
   const score = total ? correct / total : 0;
   const threshold = pack.pass_threshold ?? 0.8;
   return {
@@ -250,6 +295,7 @@ export function gradeComprehension(
     passed: score >= threshold,
     threshold,
     at: new Date().toISOString(),
+    coding,
   };
 }
 

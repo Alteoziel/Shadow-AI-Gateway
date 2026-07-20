@@ -4,6 +4,8 @@ Human review panel for Shadow AI Gateway pull requests. Receives reports from
 the Python governance CLI (Steps 1–6) and can merge via GitHub’s REST API.
 
 **Step 6 comprehension quiz must be passed (≥80%) before Approve / Merge unlock.**
+Passing also sets the GitHub commit status **`Governance Quiz`** to success so
+branch protection can block merges until you understand the change.
 
 ## Local run
 
@@ -23,8 +25,9 @@ Open http://localhost:3000
 | `GOVERNANCE_DASHBOARD_SECRET` | Yes in prod | Shared secret for CI → `/api/reviews` POSTs |
 | `UPSTASH_REDIS_REST_URL` | **Yes on Vercel** | Durable quiz/review store |
 | `UPSTASH_REDIS_REST_TOKEN` | **Yes on Vercel** | Durable quiz/review store |
-| `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | For merge | PAT with `contents:write` + `pull-requests:write` |
-| `GITHUB_REPOSITORY` | Optional | When set, merge only allows this `owner/name` |
+| `GITHUB_TOKEN` / `GH_MERGE_TOKEN` / `GH_STATUS_TOKEN` | For **Governance Quiz** check + optional merge | Commit statuses write; add contents + PRs for merge |
+| `GITHUB_REPOSITORY` | Optional | When set, merge/status only allows this `owner/name` |
+| `GOVERNANCE_DASHBOARD_PUBLIC_URL` | Optional | Link target on the GitHub quiz check |
 
 Locally, reviews stay in process memory (lost on restart). On Vercel, use Upstash
 Redis (Marketplace → Storage) — required for durable quizzes across lambdas.
