@@ -82,5 +82,6 @@ See the checklist at the bottom of this file. Workflows alone cannot turn on sec
 9. **Governance dashboard deploy**  
    Browser quiz gate — see `SETUP_GOVERNANCE.md`.
 
-10. **After merge: confirm CodeQL alerts appear**  
-    Repo → **Security** → **Code scanning**. If upload fails on first run, ensure Code scanning is enabled for the private repo (GitHub Advanced Security may be required on some plans).
+10. **Enable Code scanning, then flip CodeQL upload**  
+    Repo → **Settings** → **Code security** → enable **Code scanning** (private repos may require GitHub Advanced Security).  
+    Then in `.github/workflows/enterprise-hygiene.yml` set CodeQL `upload: true` and confirm alerts appear under **Security → Code scanning**. Until that is on, CI analyzes with `upload: false` and stores a SARIF artifact so the required check can pass.

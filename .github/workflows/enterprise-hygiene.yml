@@ -91,23 +91,24 @@ jobs:
 
       - name: "C · Semgrep"
         run: |
-          # setuptools provides pkg_resources; pin Semgrep for reproducible SAST
-          python -m pip install -U "setuptools>=75" "wheel"
-          pip install "semgrep==1.110.0"
-          # Custom rules — hard fail
-          semgrep scan \
-            --config .semgrep.yml \
-            --error \
-            --metrics off \
-            app tests
-          # Registry packs — hard fail on ERROR+ findings
-          semgrep scan \
-            --config p/python \
-            --config p/owasp-top-ten \
-            --severity=ERROR \
-            --error \
-            --metrics off \
-            app tests
+          set -euo pipefail
+          # Isolated image avoids pip/setuptools conflicts with gateway deps.
+          IMAGE="semgrep/semgrep:1.110.0"
+          docker pull "$IMAGE"
+          docker run --rm -v "$PWD:/src" -w /src "$IMAGE" \
+            semgrep scan \
+              --config .semgrep.yml \
+              --error \
+              --metrics off \
+              app tests
+          docker run --rm -v "$PWD:/src" -w /src "$IMAGE" \
+            semgrep scan \
+              --config p/python \
+              --config p/owasp-top-ten \
+              --severity=ERROR \
+              --error \
+              --metrics off \
+              app tests
 
       # ── Layer D: product tests + coverage ───────────────────────────
       - name: "D · Pytest + coverage floor"
