@@ -38,10 +38,14 @@ Locally, reviews are stored in `.data/reviews.json`. On Vercel, use Upstash Redi
 
 1. Import this GitHub repo as a **new** Vercel project
 2. Set **Root Directory** to `dashboard`
-3. Add Upstash Redis from the Storage / Marketplace tab
-4. Set `GOVERNANCE_DASHBOARD_SECRET` (and optional GitHub merge token)
-5. Deploy, then set GitHub Actions secrets:
-   - `GOVERNANCE_DASHBOARD_URL` = your `https://….vercel.app`
+3. Framework = **Next.js**; leave **Output Directory blank** (never `public`)
+4. Add Upstash Redis from the Storage / Marketplace tab
+5. Set `GOVERNANCE_DASHBOARD_SECRET` (and optional GitHub merge token)
+6. Deploy, then set GitHub Actions secrets:
+   - `GOVERNANCE_DASHBOARD_URL` = your real Production URL (not a placeholder)
    - `GOVERNANCE_DASHBOARD_SECRET` = same secret as Vercel
+
+`vercel.json` in this folder pins the framework to Next.js so Vercel does not
+treat the app as a static `public/` site.
 
 Full click-path: [`SETUP_GOVERNANCE.md`](../SETUP_GOVERNANCE.md) §4.
