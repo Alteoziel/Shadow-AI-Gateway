@@ -1,0 +1,8 @@
+# Checkov config for Layer E Terraform scans
+compact: true
+framework:
+  - terraform
+soft-fail: false
+# Phase 4 human checkpoint: attach CMK for log encryption / VPC isolation.
+skip-check:
+  - CKV_AWS_158  # CloudWatch log group CMK encryption (Phase 4)
