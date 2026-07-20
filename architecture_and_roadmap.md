@@ -69,6 +69,28 @@ Until the dashboard is deployed (`GOVERNANCE_DASHBOARD_URL` + secrets), practice
 2. Read [`.cursor/qrspi/README.md`](.cursor/qrspi/README.md), [`AUTONOMOUS_MODE.md`](.cursor/qrspi/AUTONOMOUS_MODE.md), [`CONTEXT_ISOLATION.md`](.cursor/qrspi/CONTEXT_ISOLATION.md).
 3. Run **QRSPI** with **fresh subagents per stage** and file allowlists.
 4. Never complete `TODO: Human Hands-On Implementation` blocks.
+### Required human setup (for the gate to actually protect `main`)
+
+See **§11 Setup Checklist** below. Require status checks:
+
+- **`Governance Steps 1–6`**
+- **`Enterprise Layers B–E`** (Dependabot/gitleaks/ruff/mypy/semgrep/tests/trivy/checkov — see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md))
+- **`CodeQL (Layer C)`** after it appears once
+
+Protect Main ruleset now requires those three checks + Code Owner review + dismiss stale reviews. Remaining operator steps (secret push protection, signed commits, second reviewer, etc.) are listed in [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
+
+---
+
+## 0b. Enterprise Layers B–E (additive)
+
+| Layer | Focus | Automations in repo |
+|-------|-------|---------------------|
+| B | Supply chain & secrets | Dependabot, checksummed Gitleaks, pip-audit, npm audit (high+ hard-fail) |
+| C | Static analysis | Ruff, Mypy, Semgrep (custom + ERROR packs), CodeQL Advanced (`codeql.yml`, security-extended upload), CODEOWNERS |
+| D | Product tests | API integration tests, egress/audit contracts, coverage ≥60% |
+| E | Ship & runtime | `EgressCheckedAsyncClient`, audit DDL, non-root Docker→Trivy CRITICAL+HIGH + SBOM, Terraform+Checkov |
+
+Details: [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
 ---
 
@@ -323,7 +345,10 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 ├── render.yaml
 ├── docker-compose.yml
 ├── .github/workflows/
-│   └── ai-guardrail.yml                 # Pre-merge governance CI
+│   ├── ai-guardrail.yml                 # Pre-merge governance CI
+│   └── enterprise-hygiene.yml           # Layers B–E (supply chain → ship)
+├── .github/dependabot.yml               # Layer B
+├── .github/CODEOWNERS                   # Layer C
 ├── app/                                 # Gateway service
 │   ├── main.py
 │   ├── config.py
@@ -331,8 +356,10 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 │   ├── proxy/
 │   │   ├── interceptor.py               # ★ HUMAN CHECKPOINT #1
 │   │   └── providers/...
+│   ├── security/                        # Layer E egress + audit scaffold
 │   └── models/...
-├── tests/                               # Gateway tests
+├── infra/terraform/                     # Layer E IaC stub (+ Checkov)
+├── tests/                               # Gateway tests (Layer D)
 ├── governance/                          # Steps 1–6 (Python CLI)
 │   ├── pyproject.toml
 │   ├── README.md
@@ -384,7 +411,8 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | Async enterprise API proxy / pre-flight intercept | 1 | `app/proxy/interceptor.py` |
 | Localized PII scrubbing pipeline (&lt;100ms) | 2 | Scrubbing loop (TBD path) |
 | PostgreSQL metrics & audit trails | 3 | Schema + insert path (TBD) |
-| Docker + Terraform private cloud hosting | 4 | `Dockerfile` + `main.tf` (TBD) |
+| Docker + Terraform private cloud hosting | 4 | `Dockerfile` + `infra/terraform/main.tf` (stub landed; expand in Phase 4) |
+| Egress allowlist / audit trail readiness | 1→3 | `app/security/egress.py`, `app/security/audit.py` |
 
 ---
 
@@ -394,8 +422,11 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 |------|--------|--------|
 | 2026-07-19 | Initial Ledger created; Phase 1 scaffold kicked off; Checkpoint #1 armed | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Added §0 Pre-Merge Gate; scaffolded Steps 1–6 (`governance/`, CI workflow, `dashboard/`); §11 setup checklist | Senior Engineer (Grok 4.5) |
-| 2026-07-20 | Inserted Step 6 Comprehension Gate; human review panel becomes Step 7 | Senior Engineer (Grok 4.5) |
-| 2026-07-20 | Mandated QRSPI; installed `.cursor/qrspi/`; Autonomous Mode + Context Isolation; clarified quiz vs Actions tracking | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Inserted Step 6 Comprehension Gate (beginner quiz); human review panel becomes Step 7; merge locked until ≥80% | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Landed Enterprise Layers B–E (Dependabot, Gitleaks, Ruff/Mypy/Semgrep/CodeQL, coverage floor, egress/audit, Trivy, Terraform+Checkov) | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Hardened Layers B–E: SHA-pinned Actions, checksummed Gitleaks, Semgrep packs hard-fail, Trivy CRITICAL+HIGH + SBOM, CodeQL upload, `EgressCheckedAsyncClient`, non-root image, coverage ≥60% | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Operator: Dependabot + Code scanning enabled; Protect Main tightened (strict checks, last-push approval, signed commits); CodeQL `upload: true` | Human + Senior Engineer |
+| 2026-07-20 | Advanced Code scanning: tuned `codeql.yml` (`security-extended`, `CodeQL (Layer C)` check name, SARIF upload); removed duplicate CodeQL job from hygiene workflow | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -417,14 +448,18 @@ Without these steps, the suite runs in CI but GitHub will still allow merges on 
 
 ### B. Branch protection on `main` (critical)
 
-GitHub → **Settings → Branches → Branch protection rule** for `main`:
+Prefer the **Protect Main** ruleset (already active). It requires:
 
-1. Require a pull request before merging
-2. Require status checks to pass → enable **`Governance Steps 1–6`**
-3. (Recommended) Do **not** allow bypassing for admins while learning the workflow
-4. Keep existing Vercel + Bugbot checks if desired — they stay complementary
+1. Pull request before merging
+2. Status checks: **`Governance Steps 1–6`**, **`Enterprise Layers B–E`**, **`CodeQL (Layer C)`**
+3. **Require review from Code Owners**
+4. **Dismiss stale reviews** on new pushes
+5. **Require approval of the most recent reviewable push**
+6. **Branches up to date** before merging
+7. **Signed commits**
+8. CodeQL code-scanning gate + Preview deployment
 
-Until step 2 is enabled, the governance workflow is advisory only.
+Still optional (see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md)): secret scanning + push protection (confirm on), second CODEOWNER when you have a teammate, governance dashboard deploy. **Dependabot alerts/security updates** and **Code scanning** are enabled.
 
 **Also enforce comprehension in practice:** even with CI green, use the dashboard’s Step 6 quiz before merge — Approve & Merge stays locked until you pass (≥80%).
 

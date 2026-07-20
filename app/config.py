@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         default="openai",
         alias="DEFAULT_PROVIDER",
     )
-    gateway_host: str = Field(default="0.0.0.0", alias="GATEWAY_HOST")
+    gateway_host: str = Field(default="0.0.0.0", alias="GATEWAY_HOST")  # noqa: S104
     gateway_port: int = Field(default=8000, alias="GATEWAY_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 

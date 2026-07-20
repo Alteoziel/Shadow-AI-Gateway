@@ -16,6 +16,7 @@ Before more gateway code ships, PRs are analyzed by a seven-step suite:
 | CLI (Steps 1–6) | [`governance/`](governance/) |
 | GitHub Action | [`.github/workflows/ai-guardrail.yml`](.github/workflows/ai-guardrail.yml) — check name **`Governance Steps 1–6`** |
 | Review panel (Step 7) | [`dashboard/`](dashboard/) |
+| **Enterprise Layers B–E** | [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md) + [`.github/workflows/enterprise-hygiene.yml`](.github/workflows/enterprise-hygiene.yml) |
 | Human setup checklist | Ledger **§11** + [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) |
 
 ```bash
@@ -24,6 +25,8 @@ ai-guardrail quiz --root .. --skip-llm   # YOUR understanding test (not graded i
 ```
 
 **Actions vs your quiz:** CI generates the quiz and must stay green. You take the quiz locally (`ai-guardrail quiz`) or on the dashboard after it’s deployed — that’s how *you* prove you understand the PR.
+Require status checks on `main`: **`Governance Steps 1–6`**, **`Enterprise Layers B–E`**, and **`CodeQL (Layer C)`**. Operator checklist: [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
+
 ## Phase 1 status
 
 - FastAPI async proxy with OpenAI + Anthropic provider adapters
