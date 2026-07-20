@@ -68,10 +68,38 @@ PROJECT_GLOSSARY: list[dict[str, str]] = [
         ),
     },
     {
+        "term": "provider",
+        "definition": (
+            "The outside LLM service the gateway can call, such as OpenAI or "
+            "Anthropic. Phase 1 chooses one per request or from config."
+        ),
+    },
+    {
         "term": "provider adapter",
         "definition": (
             "Code that translates our internal request shape into OpenAI's or "
             "Anthropic's specific API format."
+        ),
+    },
+    {
+        "term": "upstream provider",
+        "definition": (
+            "The external provider API reached after the gateway route and "
+            "human-owned interceptor checkpoint have allowed the request forward."
+        ),
+    },
+    {
+        "term": "streaming / SSE",
+        "definition": (
+            "A response mode where tokens/chunks flow back over time instead of "
+            "waiting for one complete JSON response."
+        ),
+    },
+    {
+        "term": "HTTP 501",
+        "definition": (
+            "Not Implemented. In Phase 1 it means Checkpoint #1 is still pending "
+            "and the human must complete the interceptor before provider forwarding."
         ),
     },
     {
@@ -255,14 +283,21 @@ def _build_deterministic_pack(
             }
         )
 
-    # Relevant glossary subset + always core terms
-    core_terms = {"pre-flight", "proxy / gateway", "environment variable", "FastAPI"}
-    glossary = [g for g in PROJECT_GLOSSARY if g["term"] in core_terms]
-    # Add more if imports suggest them
+    # Relevant glossary subset + always core Phase 1 terms.
+    core_terms = {
+        "pre-flight",
+        "proxy / gateway",
+        "environment variable",
+        "FastAPI",
+        "provider",
+        "provider adapter",
+        "upstream provider",
+        "streaming / SSE",
+        "HTTP 501",
+    }
     if "httpx" in all_imports or "fastapi" in all_imports:
-        glossary = PROJECT_GLOSSARY[:6]
-    else:
-        glossary = PROJECT_GLOSSARY[:5]
+        core_terms.add("async / await")
+    glossary = [g for g in PROJECT_GLOSSARY if g["term"] in core_terms]
 
     elevator = (
         "This change touches the Shadow AI Guardrail Gateway — an enterprise proxy "
@@ -456,6 +491,66 @@ def _make_questions(
             ],
             1,
             "The gateway owns the path; providers are adapters behind the interceptor.",
+        )
+    )
+    questions.append(
+        _q(
+            "phase1_provider_selection",
+            "vocabulary",
+            "In Phase 1, what does **provider** mean?",
+            [
+                "The outside LLM service selected for a request, such as OpenAI or Anthropic",
+                "A CSS theme provider in the dashboard",
+                "The person approving the PR",
+                "A local pytest fixture only",
+            ],
+            0,
+            "The provider is the external LLM service; the gateway chooses it from the request or default config.",
+        )
+    )
+    questions.append(
+        _q(
+            "phase1_provider_flow",
+            "how_it_works",
+            "When should the chat route choose and call a provider adapter?",
+            [
+                "Before parsing the request body",
+                "Only after `intercept_outbound_request` succeeds",
+                "Inside the copyright filter",
+                "After returning the response to the client",
+            ],
+            1,
+            "Checkpoint #1 is the pre-flight gate. Provider forwarding happens only after it succeeds.",
+        )
+    )
+    questions.append(
+        _q(
+            "phase1_streaming_flow",
+            "how_it_works",
+            "What is different when `stream=True` in the Phase 1 gateway?",
+            [
+                "The gateway buffers the whole answer and returns one JSON object",
+                "The gateway asks the provider for a stream and relays chunks/SSE back to the client",
+                "The request skips the interceptor because streaming is faster",
+                "The provider is always ignored",
+            ],
+            1,
+            "Streaming still goes through the checkpoint; only the response delivery changes to chunk/SSE relay.",
+        )
+    )
+    questions.append(
+        _q(
+            "phase1_checkpoint_501",
+            "manual_tasks",
+            "What does HTTP 501 mean for Checkpoint #1 in this project?",
+            [
+                "The provider API key is definitely wrong",
+                "The human-owned interceptor is still pending; agents must not fill `app/proxy/interceptor.py`",
+                "Streaming responses are unsupported forever",
+                "The copyright filter found a LeetCode snippet",
+            ],
+            1,
+            "Checkpoint #1 is human-owned: the human must complete `app/proxy/interceptor.py`; agents must not soften or bypass it.",
         )
     )
 

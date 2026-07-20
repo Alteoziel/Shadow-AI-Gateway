@@ -81,6 +81,27 @@ def test_copyright_exact_match(tmp_path: Path) -> None:
     assert any(f.rule_id in {"COPY001_EXACT", "COPY002_SIMILAR"} for f in result.findings)
 
 
+def test_copyright_exact_match_fastapi_httpx_antipattern(tmp_path: Path) -> None:
+    signatures = copyright_filter.load_signatures()
+    snippet = next(
+        sig["content"]
+        for sig in signatures
+        if sig["id"] == "fastapi_sync_httpx_in_async_route"
+    )
+    src = tmp_path / "blocked_gateway_clone.py"
+    src.write_text(snippet, encoding="utf-8")
+
+    result = copyright_filter.run([src])
+
+    assert result.metrics["signatures"] >= 7
+    assert not result.passed
+    assert any(
+        f.rule_id in {"COPY001_EXACT", "COPY002_SIMILAR"}
+        and "fastapi_sync_httpx_in_async_route" in f.message
+        for f in result.findings
+    )
+
+
 def test_comprehension_generates_quiz(tmp_path: Path) -> None:
     src = tmp_path / "proxy_bit.py"
     src.write_text(
@@ -99,6 +120,20 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
     assert len(pack["questions"]) >= 5
     assert pack["study_guide"]["glossary"]
     assert pack["study_guide"]["manual_dev_tasks"]
+    question_by_id = {q["id"]: q for q in pack["questions"]}
+    expected_phase1_questions = {
+        "phase1_provider_selection",
+        "phase1_provider_flow",
+        "phase1_streaming_flow",
+        "phase1_checkpoint_501",
+    }
+    assert expected_phase1_questions <= set(question_by_id)
+    assert {
+        question_by_id[qid]["category"] for qid in expected_phase1_questions
+    } == {"vocabulary", "how_it_works", "manual_tasks"}
+    checkpoint = question_by_id["phase1_checkpoint_501"]
+    assert "human-owned" in checkpoint["explanation"]
+    assert "app/proxy/interceptor.py" in checkpoint["explanation"]
 
 
 def test_comprehension_grade_pass_fail() -> None:
