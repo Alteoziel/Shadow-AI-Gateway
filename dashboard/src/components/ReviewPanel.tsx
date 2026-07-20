@@ -12,15 +12,24 @@ import {
 } from "recharts";
 import type { Review, StepResult } from "@/lib/store";
 
-const SECRET_KEY = "governance_reviewer_secret";
+/**
+ * Keep the reviewer secret in process memory only — never sessionStorage /
+ * localStorage (CodeQL js/clear-text-storage-of-sensitive-data).
+ * Cleared on full page reload; user re-enters via Unlock.
+ */
+let reviewerSecretMemory = "";
 
 function getReviewerSecret(): string {
   if (typeof window === "undefined") return "";
-  return sessionStorage.getItem(SECRET_KEY) || "";
+  return reviewerSecretMemory;
 }
 
 function setReviewerSecret(value: string) {
-  sessionStorage.setItem(SECRET_KEY, value);
+  reviewerSecretMemory = value;
+}
+
+function clearReviewerSecret() {
+  reviewerSecretMemory = "";
 }
 
 function ensureReviewerSecret(): string | null {
@@ -165,7 +174,7 @@ function ReviewerUnlock() {
             type="button"
             className="text-signal underline"
             onClick={() => {
-              sessionStorage.removeItem(SECRET_KEY);
+              clearReviewerSecret();
               setHasSecret(false);
             }}
           >
@@ -247,7 +256,7 @@ function ComprehensionPanel({ review }: { review: Review }) {
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 401) {
-          sessionStorage.removeItem(SECRET_KEY);
+          clearReviewerSecret();
         }
         setMessage(data.message || data.error || "Quiz submit failed");
         return;
@@ -433,7 +442,7 @@ export function ReviewActions({ review }: { review: Review }) {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 401) {
-        sessionStorage.removeItem(SECRET_KEY);
+        clearReviewerSecret();
       }
       alert(data.message || data.error || "Action failed");
       return;

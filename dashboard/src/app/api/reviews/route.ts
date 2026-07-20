@@ -3,12 +3,12 @@ import {
   authorizeIngest,
   unauthorizedResponse,
 } from "@/lib/auth";
+import { parseIngestBody } from "@/lib/ingest";
 import {
   getStoreStatus,
   listReviews,
   upsertReview,
   sanitizeReviewForClient,
-  type StepResult,
 } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -27,15 +27,16 @@ export async function POST(req: NextRequest) {
     return unauthorizedResponse("ingest");
   }
 
-  const body = await req.json();
-  const review = await upsertReview({
-    passed: Boolean(body.passed),
-    pr_number: body.pr_number ?? null,
-    commit_sha: body.commit_sha ?? null,
-    repo: body.repo ?? null,
-    steps: (body.steps ?? []) as StepResult[],
-    summary: body.summary ?? {},
-  });
+  const body = await req.json().catch(() => null);
+  const parsed = parseIngestBody(body);
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: "invalid_payload", message: parsed.error },
+      { status: 400 }
+    );
+  }
+
+  const review = await upsertReview(parsed.data);
 
   return NextResponse.json(
     { review: sanitizeReviewForClient(review) },

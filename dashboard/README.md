@@ -24,9 +24,11 @@ Open http://localhost:3000
 | `UPSTASH_REDIS_REST_URL` | **Yes on Vercel** | Durable quiz/review store |
 | `UPSTASH_REDIS_REST_TOKEN` | **Yes on Vercel** | Durable quiz/review store |
 | `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | For merge | PAT with `contents:write` + `pull-requests:write` |
+| `GITHUB_REPOSITORY` | Optional | When set, merge only allows this `owner/name` |
 
-Locally, reviews are stored in `.data/reviews.json`. On Vercel, use Upstash Redis
-(Marketplace → Storage) — the serverless filesystem cannot hold quizzes.
+Locally, reviews stay in process memory (lost on restart). On Vercel, use Upstash
+Redis (Marketplace → Storage) — required for durable quizzes across lambdas.
+Never persists HTTP ingest payloads to disk (avoids CodeQL http-to-file alerts).
 
 ## API
 

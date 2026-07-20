@@ -1,17 +1,15 @@
 /**
  * Lightweight review store.
  *
- * Priority:
- * 1. Upstash Redis / Vercel KV (durable on serverless) — preferred on Vercel
- * 2. JSON file — local `.data/`, or `/tmp` when `VERCEL` is set (ephemeral)
+ * - Preferred: Upstash Redis / Vercel KV (durable on serverless)
+ * - Fallback (local/dev): in-process memory
  *
- * Reads never throw to the UI: callers get [] + optional setup error via
- * `getStoreStatus()`. Writes throw only when no backend can persist.
+ * Intentionally avoids filesystem persistence. Writing HTTP request bodies to
+ * disk (and later reading them into outbound fetch calls) is the pattern
+ * CodeQL flags as js/http-to-file-access and js/file-access-to-http.
  */
 
 import { createHash } from "crypto";
-import { promises as fs } from "fs";
-import path from "path";
 import { Redis } from "@upstash/redis";
 
 export type Severity = "info" | "warning" | "error" | "critical";
@@ -100,23 +98,18 @@ export type Review = {
 };
 
 export type StoreStatus = {
-  backend: "redis" | "file";
+  backend: "redis" | "memory";
   durable: boolean;
   warning: string | null;
 };
 
 const REDIS_KEY = "governance:reviews";
 
+/** Process-local fallback when Redis is not configured (dev / single instance). */
+let memoryReviews: Review[] = [];
+
 function isVercel(): boolean {
   return Boolean(process.env.VERCEL);
-}
-
-function fileStorePath(): string {
-  // Vercel serverless FS is read-only except /tmp
-  if (isVercel()) {
-    return path.join("/tmp", "governance-reviews.json");
-  }
-  return path.join(process.cwd(), ".data", "reviews.json");
 }
 
 function redisClient(): Redis | null {
@@ -140,32 +133,18 @@ export function getStoreStatus(): StoreStatus {
   }
   if (isVercel()) {
     return {
-      backend: "file",
+      backend: "memory",
       durable: false,
       warning:
-        "Running on Vercel without Upstash Redis. Quiz data is stored in /tmp and will not survive across serverless instances. Add Upstash Redis (Storage tab) and set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_*), then redeploy.",
+        "Running on Vercel without Upstash Redis. Reviews stay in process memory and will not survive across serverless instances. Add Upstash Redis (Storage tab) and set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_*), then redeploy.",
     };
   }
-  return { backend: "file", durable: true, warning: null };
-}
-
-async function readFileReviews(): Promise<Review[]> {
-  const storePath = fileStorePath();
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-  try {
-    const raw = await fs.readFile(storePath, "utf8");
-    const parsed = JSON.parse(raw) as Review[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    await fs.writeFile(storePath, "[]", "utf8");
-    return [];
-  }
-}
-
-async function writeFileReviews(reviews: Review[]): Promise<void> {
-  const storePath = fileStorePath();
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-  await fs.writeFile(storePath, JSON.stringify(reviews, null, 2), "utf8");
+  return {
+    backend: "memory",
+    durable: false,
+    warning:
+      "Using in-memory store (local). Data resets when the process restarts. For durable quizzes on Vercel, attach Upstash Redis.",
+  };
 }
 
 async function readReviews(): Promise<Review[]> {
@@ -183,7 +162,7 @@ async function readReviews(): Promise<Review[]> {
     }
     return [];
   }
-  return readFileReviews();
+  return memoryReviews;
 }
 
 async function writeReviews(reviews: Review[]): Promise<void> {
@@ -192,7 +171,7 @@ async function writeReviews(reviews: Review[]): Promise<void> {
     await redis.set(REDIS_KEY, reviews);
     return;
   }
-  await writeFileReviews(reviews);
+  memoryReviews = reviews;
 }
 
 export function extractComprehension(
