@@ -200,12 +200,12 @@ In the PR flow:
 ### Verification
 
 #### Automated
-- [ ] `rg -n "Governance Steps 1.?6|quiz generation|does not grade|Actions does not grade|dashboard.*80|>=80|Approve|Approve & Merge|ai-guardrail quiz" architecture_and_roadmap.md README.md SETUP_GOVERNANCE.md` shows consistent CI-vs-human wording.
-- [ ] `git diff -- app/proxy/interceptor.py app/api/v1/chat.py tests/test_interceptor_contract.py tests/test_proxy_routing.py` is empty.
+- [x] `rg -n "Governance Steps 1.?6|quiz generation|does not grade|Actions does not grade|dashboard.*80|>=80|Approve|Approve & Merge|ai-guardrail quiz" architecture_and_roadmap.md README.md SETUP_GOVERNANCE.md` shows consistent CI-vs-human wording.
+- [x] `git diff -- app/proxy/interceptor.py app/api/v1/chat.py tests/test_interceptor_contract.py tests/test_proxy_routing.py` is empty.
 
 #### Manual
-- [ ] The docs do not imply GitHub Actions grades the human quiz attempt.
-- [ ] A new contributor can tell that branch protection requires `Governance Steps 1-6`, while the dashboard separately gates Approve / Approve & Merge.
+- [x] The docs do not imply GitHub Actions grades the human quiz attempt. — autonomous: verified via "Actions does not grade" / "does not grade the human" wording
+- [x] A new contributor can tell that branch protection requires `Governance Steps 1-6`, while the dashboard separately gates Approve / Approve & Merge. — autonomous: verified via SETUP_GOVERNANCE §2 and §6
 
 ---
 

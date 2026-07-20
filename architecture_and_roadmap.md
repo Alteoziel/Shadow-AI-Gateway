@@ -52,6 +52,18 @@ Step 6 forces a pause:
 
 Tone: supportive teacher for a beginner, not a gotcha trap. Wrong answers show explanations so you learn.
 
+### How Step 6 is tracked
+
+The GitHub Actions status check is named `Governance Steps 1-6`. It runs the automated suite and verifies Step 6 quiz generation.
+
+Actions does not grade the human. The human comprehension pass happens in the dashboard before Step 7 Approve / Approve & Merge unlocks. Local practice is available with:
+
+```bash
+ai-guardrail quiz --root .. --skip-llm
+```
+
+The dashboard pass threshold is ≥80%.
+
 ### Plan adjustments (vs original 6-step deep dive)
 
 1. **Python-first suite** (not a separate Node CLI) — matches the gateway stack and uses stdlib `ast` instead of Babel. The dashboard remains Next.js/TS as planned.

@@ -16,6 +16,9 @@ Before more gateway code ships, PRs are analyzed by a seven-step suite:
 
 1. AST · 2. OWASP · 3. Fuzz · 4. Big-O · 5. Copyright · **6. Comprehension quiz** · 7. Human review / merge
 
+- GitHub Actions check: `Governance Steps 1-6` runs AST, OWASP/security, fuzz, Big-O, copyright, and Step 6 quiz generation.
+- Dashboard Step 7: the human reads the study guide, passes the Step 6 quiz at ≥80%, then Approve / Approve & Merge unlocks.
+
 | Component | Path |
 |-----------|------|
 | CLI (Steps 1–6) | [`governance/`](governance/) |
@@ -25,7 +28,7 @@ Before more gateway code ships, PRs are analyzed by a seven-step suite:
 
 ```bash
 cd governance && pip install -e ".[dev]" && ai-guardrail run --root ..
-ai-guardrail quiz --root .. --skip-llm   # practice understanding the change
+ai-guardrail quiz --root .. --skip-llm   # local practice; Actions does not grade the human
 ```
 
 ## Phase 1 status

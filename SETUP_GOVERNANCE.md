@@ -11,8 +11,12 @@ Bring `governance/`, `.github/workflows/ai-guardrail.yml`, and `dashboard/` onto
 GitHub → **Settings → Branches** → protect `main`:
 
 1. Require a pull request before merging
-2. Require status checks to pass → select **`Governance Steps 1–6`**
+2. Require status checks to pass → select **`Governance Steps 1-6`**
 3. Optionally keep Vercel + Bugbot required as well
+
+Require the status check named `Governance Steps 1-6`.
+
+The check proves automated Steps 1-5 plus Step 6 quiz generation. It does not grade the human quiz attempt.
 
 Until this is on, the workflow is advisory only — PRs can still merge without it.
 
@@ -69,16 +73,22 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ai-guardrail run --root .. --skip-llm
-ai-guardrail quiz --root .. --skip-llm    # practice the comprehension gate
+ai-guardrail quiz --root .. --skip-llm    # local practice; Actions does not grade the human
 ```
 
 ## 6. How a PR flows after setup
+
+1. GitHub Actions runs `Governance Steps 1-6`.
+2. Step 6 generates the beginner study guide and quiz pack.
+3. The dashboard receives the report.
+4. The reviewer studies the guide and passes the dashboard quiz at ≥80%.
+5. Step 7 Approve / Approve & Merge unlocks.
 
 ```text
 Open PR → main
    ├─ Vercel check (dashboard deploys, if linked)
    ├─ Cursor Bugbot (review comments)
-   └─ AI Code Guardrail workflow
+   └─ Governance Steps 1-6 workflow
         ├─ Steps 1–5: automated analysis
         ├─ Step 6: generate beginner study guide + quiz
         ├─ PR summary + inline comments on failures
