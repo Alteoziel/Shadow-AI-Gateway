@@ -2,13 +2,8 @@
 
 Enterprise security proxy that sits between corporate users and public LLMs (OpenAI / Anthropic) to intercept outbound traffic **pre-flight**.
 
-Read [`architecture_and_roadmap.md`](architecture_and_roadmap.md) first. The Ledger is the source of truth and wins if instructions conflict.
-
-For developmental work, follow QRSPI:
-
-- Playbooks: [`.cursor/qrspi/`](.cursor/qrspi/)
-- Artifacts: [`thoughts/qrspi/`](thoughts/qrspi/)
-- Current law: [`architecture_and_roadmap.md`](architecture_and_roadmap.md)
+> **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger** — phases, checkpoints, guardrails.  
+> **Task process:** [`.cursor/qrspi/`](.cursor/qrspi/) — mandatory QRSPI (see `AUTONOMOUS_MODE.md` + `CONTEXT_ISOLATION.md`).
 
 ## Pre-merge gate (AI Governance Engine)
 
@@ -16,24 +11,23 @@ Before more gateway code ships, PRs are analyzed by a seven-step suite:
 
 1. AST · 2. OWASP · 3. Fuzz · 4. Big-O · 5. Copyright · **6. Comprehension quiz** · 7. Human review / merge
 
-- GitHub Actions check: `Governance Steps 1-6` runs AST, OWASP/security, fuzz, Big-O, copyright, and Step 6 quiz generation.
-- Dashboard Step 7: the human reads the study guide, passes the Step 6 quiz at ≥80%, then Approve / Approve & Merge unlocks.
-
 | Component | Path |
 |-----------|------|
 | CLI (Steps 1–6) | [`governance/`](governance/) |
-| GitHub Action | [`.github/workflows/ai-guardrail.yml`](.github/workflows/ai-guardrail.yml) |
+| GitHub Action | [`.github/workflows/ai-guardrail.yml`](.github/workflows/ai-guardrail.yml) — check name **`Governance Steps 1–6`** |
 | Review panel (Step 7) | [`dashboard/`](dashboard/) |
+| **Enterprise Layers B–E** | [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md) + [`.github/workflows/enterprise-hygiene.yml`](.github/workflows/enterprise-hygiene.yml) |
 | Human setup checklist | Ledger **§11** + [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) |
 
 ```bash
 cd governance && pip install -e ".[dev]" && ai-guardrail run --root ..
-ai-guardrail quiz --root .. --skip-llm   # local practice; Actions does not grade the human
+ai-guardrail quiz --root .. --skip-llm   # YOUR understanding test (not graded inside Actions)
 ```
 
-## Phase 1 status
+**Actions vs your quiz:** CI generates the quiz and must stay green. You take the quiz locally (`ai-guardrail quiz`) or on the dashboard after it’s deployed — that’s how *you* prove you understand the PR.
+Require status checks on `main`: **`Governance Steps 1–6`**, **`Enterprise Layers B–E`**, and **`CodeQL (Layer C)`**. Operator checklist: [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
-Current product checkpoint: `app/proxy/interceptor.py` remains human-owned and `blocked_on_human`; QRSPI agents must not implement it.
+## Phase 1 status
 
 - FastAPI async proxy with OpenAI + Anthropic provider adapters
 - Streaming and non-streaming `POST /v1/chat/completions`
@@ -118,5 +112,3 @@ See `.env.example` for a copy-paste template.
 ## Project layout
 
 See **§7** in [The Ledger](architecture_and_roadmap.md) for the canonical repository tree and phase boundaries.
-
-Branch protection on `main` requires the status check **`Governance Steps 1-6`** once enabled — see Ledger **§11** and [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) for the human setup checklist.
