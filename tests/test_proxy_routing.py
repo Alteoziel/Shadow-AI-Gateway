@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.proxy.correlation import CORRELATION_ID_HEADER
 
 client = TestClient(app)
 
@@ -17,6 +18,7 @@ def test_chat_returns_501_while_interceptor_not_implemented():
     """Full provider routing unlocks after human fills Checkpoint #1."""
     response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
     assert response.status_code == 501
+    assert response.headers[CORRELATION_ID_HEADER].startswith("corr_")
     detail = response.json()["detail"]
     assert "Checkpoint #1" in detail
     assert "intercept_outbound_request" in detail
@@ -33,6 +35,7 @@ async def test_chat_forwards_to_provider_after_interceptor_implemented():
         "messages": [{"role": "user", "content": "ping"}],
     }
     mock_provider = AsyncMock()
+    mock_interceptor = AsyncMock(return_value=normalized)
     mock_provider.chat_completion.return_value = {
         "id": "chatcmpl-test",
         "object": "chat.completion",
@@ -49,7 +52,7 @@ async def test_chat_forwards_to_provider_after_interceptor_implemented():
     with (
         patch(
             "app.api.v1.chat.intercept_outbound_request",
-            new=AsyncMock(return_value=normalized),
+            new=mock_interceptor,
         ),
         patch(
             "app.api.v1.chat.OpenAIProvider",
@@ -59,6 +62,58 @@ async def test_chat_forwards_to_provider_after_interceptor_implemented():
         response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
 
     assert response.status_code == 200
+    assert response.headers[CORRELATION_ID_HEADER].startswith("corr_")
     assert response.json()["choices"][0]["message"]["content"] == "pong"
+    interceptor_kwargs = mock_interceptor.await_args.kwargs
+    assert interceptor_kwargs["metadata"] == {"path": "/v1/chat/completions"}
+    assert "correlation_id" not in interceptor_kwargs["metadata"]
+    assert "received_at" not in interceptor_kwargs["metadata"]
+    mock_provider.chat_completion.assert_awaited_once()
+    mock_provider.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_chat_uses_request_provider_after_interceptor_implemented():
+    """Unlock path also honors request-level provider selection."""
+    normalized = {
+        "model": "claude-3-5-sonnet-latest",
+        "messages": [{"role": "user", "content": "ping"}],
+    }
+    mock_provider = AsyncMock()
+    mock_provider.chat_completion.return_value = {
+        "id": "msg-test",
+        "object": "chat.completion",
+        "model": "claude-3-5-sonnet-latest",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "pong"},
+                "finish_reason": "end_turn",
+            }
+        ],
+    }
+
+    with (
+        patch(
+            "app.api.v1.chat.intercept_outbound_request",
+            new=AsyncMock(return_value=normalized),
+        ),
+        patch(
+            "app.api.v1.chat.AnthropicProvider",
+            return_value=mock_provider,
+        ) as mock_anthropic_provider,
+    ):
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                **CHAT_PAYLOAD,
+                "model": "claude-3-5-sonnet-latest",
+                "provider": "anthropic",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "pong"
+    mock_anthropic_provider.assert_called_once()
     mock_provider.chat_completion.assert_awaited_once()
     mock_provider.aclose.assert_awaited_once()
