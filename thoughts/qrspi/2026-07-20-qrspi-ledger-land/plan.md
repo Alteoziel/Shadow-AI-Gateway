@@ -333,14 +333,14 @@ Do not edit:
 ### Verification
 
 #### Automated
-- [ ] `rg -n "blocked_on_human|app/proxy/interceptor.py|Never auto-complete|must not implement|Human-in-the-Loop|Autonomous Mode|Autonomous QRSPI|product checkpoint|TODO: Human Hands-On Implementation" architecture_and_roadmap.md README.md SETUP_GOVERNANCE.md` confirms boundary text.
-- [ ] `git diff --name-only` contains only `architecture_and_roadmap.md`, `README.md`, `SETUP_GOVERNANCE.md`, and QRSPI artifact/doc files.
-- [ ] `git diff -- app/proxy/interceptor.py app/api/v1/chat.py tests/test_interceptor_contract.py tests/test_proxy_routing.py` is empty.
-- [ ] `git status --short -- .cursor/qrspi thoughts/qrspi/README.md` is empty after the final commit, proving required QRSPI playbooks and artifact README are committed.
+- [x] `rg -n "blocked_on_human|app/proxy/interceptor.py|Never auto-complete|must not implement|Human-in-the-Loop|Autonomous Mode|Autonomous QRSPI|product checkpoint|TODO: Human Hands-On Implementation" architecture_and_roadmap.md README.md SETUP_GOVERNANCE.md` confirms boundary text.
+- [x] `git diff --name-only` contains only `architecture_and_roadmap.md`, `README.md`, `SETUP_GOVERNANCE.md`, and QRSPI artifact/doc files.
+- [x] `git diff -- app/proxy/interceptor.py app/api/v1/chat.py tests/test_interceptor_contract.py tests/test_proxy_routing.py` is empty.
+- [x] `git status --short -- .cursor/qrspi thoughts/qrspi/README.md` is empty after the final commit, proving required QRSPI playbooks and artifact README are committed.
 
 #### Manual
-- [ ] Every autonomy statement is paired with or near the product-checkpoint exception.
-- [ ] The final docs consistently say: Ledger wins; QRSPI is mandatory; Actions generates Step 6 quiz evidence; dashboard/local practice handles human comprehension; `app/proxy/interceptor.py` remains untouched.
+- [x] Every autonomy statement is paired with or near the product-checkpoint exception. — autonomous: verified via rg output showing Autonomous QRSPI + Product Learning Checkpoints + checkpoint reminders
+- [x] The final docs consistently say: Ledger wins; QRSPI is mandatory; Actions generates Step 6 quiz evidence; dashboard/local practice handles human comprehension; `app/proxy/interceptor.py` remains untouched. — autonomous: verified via full-doc rg sweep and empty runtime diffs
 
 ---
 

@@ -2,6 +2,8 @@
 
 The seven-step suite is in the repo. **It will not protect `main` until you finish these setup steps.** Right now you only have Vercel deploy checks + Cursor Bugbot; those stay, and this gate is additive.
 
+Governance and QRSPI enforce process. They do not auto-complete Human-in-the-Loop product checkpoints such as `app/proxy/interceptor.py`.
+
 ## 1. Merge this PR (and the architecture ledger PR if still open)
 
 Bring `governance/`, `.github/workflows/ai-guardrail.yml`, and `dashboard/` onto `main`.

@@ -383,7 +383,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 |------|--------|--------|
 | 2026-07-19 | Initial Ledger created; Phase 1 scaffold kicked off; Checkpoint #1 armed | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Added §0 Pre-Merge Gate; scaffolded Steps 1–6 (`governance/`, CI workflow, `dashboard/`); §11 setup checklist | Senior Engineer (Grok 4.5) |
-| 2026-07-20 | Inserted Step 6 Comprehension Gate (beginner quiz); human review panel becomes Step 7; merge locked until ≥80% | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Mandated QRSPI; clarified Ledger precedence, Actions quiz generation vs dashboard grading, branch protection check name | QRSPI Stage 7 |
 
 ---
 

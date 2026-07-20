@@ -33,6 +33,8 @@ ai-guardrail quiz --root .. --skip-llm   # local practice; Actions does not grad
 
 ## Phase 1 status
 
+Current product checkpoint: `app/proxy/interceptor.py` remains human-owned and `blocked_on_human`; QRSPI agents must not implement it.
+
 - FastAPI async proxy with OpenAI + Anthropic provider adapters
 - Streaming and non-streaming `POST /v1/chat/completions`
 - **Human Checkpoint #1:** `app/proxy/interceptor.py` — returns `501` until implemented
