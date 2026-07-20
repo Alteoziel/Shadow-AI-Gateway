@@ -6,7 +6,7 @@ These sit **beside** Governance Steps 1–6 (AI Code Guardrail).
 | Layer | What | Where |
 |-------|------|-------|
 | **B** Supply chain & secrets | Dependabot (alerts + security updates **enabled**), checksummed Gitleaks, pip-audit, npm audit (high+) | `.github/dependabot.yml`, `.gitleaks.toml`, CI job |
-| **C** Static analysis | Ruff, Mypy, Semgrep (custom + packs hard-fail), CodeQL (**Code scanning enabled**, upload on), CODEOWNERS | `pyproject.toml`, `.semgrep.yml`, `.github/CODEOWNERS`, CI |
+| **C** Static analysis | Ruff, Mypy, Semgrep (custom + packs hard-fail), CodeQL Advanced (**enabled**, SARIF upload on), CODEOWNERS | `pyproject.toml`, `.semgrep.yml`, `.github/workflows/codeql.yml`, `.github/CODEOWNERS`, CI |
 | **D** Product tests | API integration + security contracts + coverage floor (**≥60%**) | `tests/`, `pyproject.toml` coverage config |
 | **E** Ship & runtime | Egress-checked HTTP client, audit schema, Dockerfile (non-root)→Trivy CRITICAL+HIGH, SBOM, Terraform→Checkov | `app/security/`, `infra/terraform/`, CI |
 
@@ -14,9 +14,9 @@ These sit **beside** Governance Steps 1–6 (AI Code Guardrail).
 
 These must stay required on `main`:
 
-1. **`Governance Steps 1–6`**
-2. **`Enterprise Layers B–E`**
-3. **`CodeQL (Layer C)`**
+1. **`Governance Steps 1–6`** — `.github/workflows/ai-guardrail.yml`
+2. **`Enterprise Layers B–E`** — `.github/workflows/enterprise-hygiene.yml`
+3. **`CodeQL (Layer C)`** — python job in `.github/workflows/codeql.yml` (Advanced setup; uploads to Security → Code scanning)
 
 Also required on Protect Main: Code Owner review, dismiss stale reviews, up-to-date branch, approval of most recent push, signed commits, CodeQL code-scanning gate, Preview deployment.
 
@@ -51,10 +51,9 @@ Also required on Protect Main: Code Owner review, dismiss stale reviews, up-to-d
 - [x] Block force-pushes / branch deletion on default branch
 - [x] Require signed commits
 - [x] Code scanning rule in ruleset (CodeQL high_or_higher / errors)
-- [x] **Code scanning enabled** (repo Code security — **default setup**; `Analyze (python/js/actions)` feed the Security tab)
+- [x] **Code scanning — Advanced setup** (`.github/workflows/codeql.yml` uploads SARIF; `queries: security-extended`)
 - [x] **Dependabot alerts + security updates enabled** (repo Code security; `.github/dependabot.yml` present)
 - [x] Required Preview deployment (`Preview – shadow-ai-gateway`)
-- [x] Required `CodeQL (Layer C)` job (security-extended analysis; SARIF artifact only while default setup is on)
 
 ### Still optional / later
 
@@ -62,7 +61,7 @@ Also required on Protect Main: Code Owner review, dismiss stale reviews, up-to-d
    Repo → **Settings** → **Code security** → enable **Secret scanning** and **Push protection** (if not already on).
 
 2. **Restrict who can push / bypass**  
-   Ruleset → set bypass actors to **none** (or only a break-glass admin).
+   Ruleset → set bypass actors to **none** (or only a break-glass admin). Prefer **never** committing straight to `main` — use PRs so the gates actually run.
 
 3. **Private vulnerability reporting** (optional)  
    Code security → **Private vulnerability reporting**.
@@ -72,7 +71,3 @@ Also required on Protect Main: Code Owner review, dismiss stale reviews, up-to-d
 
 5. **Governance dashboard deploy**  
    Browser quiz gate — see `SETUP_GOVERNANCE.md`.
-
-6. **(Optional) Switch Code scanning to Advanced setup**  
-   If you want *this* repo’s `CodeQL (Layer C)` workflow to upload SARIF with `security-extended` queries:  
-   Settings → Code security → Code scanning → **Disable default setup** / switch to **Advanced**, then set `upload: true` on the CodeQL step in `enterprise-hygiene.yml`. Until then, leave `upload: false` — default `Analyze (*)` jobs already publish alerts.
