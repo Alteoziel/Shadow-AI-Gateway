@@ -106,7 +106,7 @@ async def test_openai_provider_posts_payload_with_auth_headers():
     assert route.called
     assert _request_json(route) == payload
     assert route.calls.last.request.headers["authorization"] == (
-        "Bearer openai-test-key"
+        "Bearer your_openai_test_key"
     )
 
 
@@ -146,7 +146,7 @@ async def test_anthropic_provider_posts_mapped_payload_and_returns_openai_shape(
         "max_tokens": 64,
         "system": "Be brief.",
     }
-    assert route.calls.last.request.headers["x-api-key"] == "anthropic-test-key"
+    assert route.calls.last.request.headers["x-api-key"] == "your_anthropic_test_key"
     assert response["choices"][0]["message"]["content"] == "pong"
     assert response["usage"]["total_tokens"] == 7
 
