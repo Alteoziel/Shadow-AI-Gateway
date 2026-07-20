@@ -9,7 +9,8 @@
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
 **Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (comprehension gate added)  
-**Task workflow:** QRSPI mandatory for developmental tasks; docs-only/process tasks still record artifacts when run through QRSPI.
+**Task workflow:** QRSPI mandatory for developmental tasks; docs-only/process tasks still record artifacts when run through QRSPI.  
+**Phase 1 readiness envelope:** `in_progress` — nine QRSPI agent packages landed around Checkpoint #1 (providers, gateway CI, correlation scaffold, governance deepenings, dashboard ops, Phase 2 scrub stub). Checkpoint #1 remains human-owned.
 
 ---
 
@@ -222,6 +223,24 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 | 3 | Run — Postgres Audit | TBD | Human | `not_started` | `not_started` |
 | 4 | Cloud — Docker + Terraform | TBD | Human | `not_started` | `not_started` |
 
+### Phase 1 readiness envelope (agent-safe; Checkpoint #1 still blocked)
+
+Landed via nine parallel QRSPI parent agents (artifacts under `thoughts/qrspi/2026-07-20-*`):
+
+| Agent package | Status |
+|---------------|--------|
+| QRSPI playbooks + Ledger process law | landed |
+| Provider reliability (keys / upstream errors / Anthropic stream contract) | landed |
+| Gateway test matrix + CI | landed |
+| Correlation + request logging scaffold (outside interceptor) | landed |
+| AST gateway rules (§11.E.1) | landed |
+| Fuzz/bench on real helpers (§11.E.2–3) | landed |
+| Copyright signatures + Phase 1 quiz packs (§11.E.4–5) | landed |
+| Dashboard deployability hardening (§11.C) | landed |
+| Phase 2 scrub stub path (`app/scrub/pipeline.py`) | landed |
+
+**Next human unlock:** implement `intercept_outbound_request` in `app/proxy/interceptor.py`. Agents must not fill it.
+
 ---
 
 ## 5. Operational Protocol - QRSPI Is Mandatory
@@ -384,6 +403,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | 2026-07-19 | Initial Ledger created; Phase 1 scaffold kicked off; Checkpoint #1 armed | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Added §0 Pre-Merge Gate; scaffolded Steps 1–6 (`governance/`, CI workflow, `dashboard/`); §11 setup checklist | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Mandated QRSPI; clarified Ledger precedence, Actions quiz generation vs dashboard grading, branch protection check name | QRSPI Stage 7 |
+| 2026-07-20 | Phase 1 readiness envelope via nine QRSPI agents (providers, CI, correlation, governance, dashboard, Phase 2 stub); Checkpoint #1 still `blocked_on_human` | Senior Engineer (Grok 4.5) |
 
 ---
 

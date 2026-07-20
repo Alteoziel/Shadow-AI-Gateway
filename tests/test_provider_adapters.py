@@ -5,6 +5,7 @@ import pytest
 import respx
 
 from app.config import Settings
+from app.proxy.payloads import to_anthropic_payload
 from app.proxy.providers.anthropic import (
     ANTHROPIC_MESSAGES_URL,
     AnthropicProvider,
@@ -37,7 +38,7 @@ def test_anthropic_payload_maps_gateway_payload():
         "stop": "END",
     }
 
-    anthropic_payload = AnthropicProvider._to_anthropic_payload(payload)
+    anthropic_payload = to_anthropic_payload(payload)
 
     assert anthropic_payload == {
         "model": "claude-3-5-sonnet-latest",
