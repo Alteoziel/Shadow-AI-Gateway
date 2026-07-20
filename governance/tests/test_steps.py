@@ -139,6 +139,82 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
         assert q["language"] == "javascript"
     assert pack["study_guide"]["glossary"]
     assert pack["study_guide"]["manual_dev_tasks"]
+    # Static template IDs from the old bank must not reappear
+    banned = {
+        "vocab_preflight",
+        "vocab_gateway",
+        "pic_phases",
+        "pic_why_quiz",
+        "how_flow",
+        "dep_meaning",
+        "sec_why_gate",
+        "sec_keys",
+        "manual_checkpoint",
+    }
+    ids = {q["id"] for q in pack["questions"]}
+    assert ids.isdisjoint(banned)
+    mc = [q for q in pack["questions"] if q.get("question_type") != "coding"]
+    assert len(mc) >= 5
+    # Prompts should mention this PR's symbols/files, not only generic project lore
+    blob = " ".join(q["prompt"] for q in mc).lower()
+    assert "intercept_outbound_request" in blob or "proxy_bit" in blob or "score_prompt" in blob
+
+
+def test_comprehension_quiz_varies_by_pr_files(tmp_path: Path) -> None:
+    proxy = tmp_path / "app" / "proxy"
+    proxy.mkdir(parents=True)
+    dash = tmp_path / "dashboard" / "src" / "lib"
+    dash.mkdir(parents=True)
+
+    interceptor = proxy / "interceptor.py"
+    interceptor.write_text(
+        "async def intercept_outbound_request(body):\n"
+        '    """Validate before provider call."""\n'
+        "    return body\n",
+        encoding="utf-8",
+    )
+    store = dash / "store.ts"
+    store.write_text(
+        "import { Redis } from '@upstash/redis';\n"
+        "export function gradeComprehension(pack, answers) {\n"
+        "  return { passed: true };\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "dashboard" / "package.json").write_text(
+        '{"dependencies":{"next":"15.0.0","@upstash/redis":"1.0.0","react":"19.0.0"}}',
+        encoding="utf-8",
+    )
+
+    pack_a = comprehension_gate.run(
+        [interceptor],
+        diff_text="diff --git a/app/proxy/interceptor.py",
+        root=tmp_path,
+        skip_llm=True,
+    ).metrics["comprehension"]
+    pack_b = comprehension_gate.run(
+        [store],
+        diff_text="diff --git a/dashboard/src/lib/store.ts",
+        root=tmp_path,
+        skip_llm=True,
+    ).metrics["comprehension"]
+
+    ids_a = [q["id"] for q in pack_a["questions"] if q.get("question_type") != "coding"]
+    ids_b = [q["id"] for q in pack_b["questions"] if q.get("question_type") != "coding"]
+    assert ids_a != ids_b
+
+    gloss_a = {g["term"] for g in pack_a["study_guide"]["glossary"]}
+    gloss_b = {g["term"] for g in pack_b["study_guide"]["glossary"]}
+    assert gloss_a != gloss_b
+
+    assert "proxy" in " ".join(pack_a["study_guide"]["areas"])
+    assert "dashboard" in " ".join(pack_b["study_guide"]["areas"])
+    assert "intercept_outbound_request" in {
+        f["name"] for f in pack_a["study_guide"]["key_functions"]
+    }
+    assert "gradeComprehension" in {
+        f["name"] for f in pack_b["study_guide"]["key_functions"]
+    }
 
 
 def test_comprehension_grade_pass_fail() -> None:

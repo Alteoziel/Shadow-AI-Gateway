@@ -9,8 +9,11 @@ before approving a merge. Shipping code you cannot explain is the danger.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
+import random
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,63 +26,131 @@ STEP_NAME = "Comprehension Gate (Dev Understanding Check)"
 
 PASS_THRESHOLD = 0.8  # 80% correct required on the dashboard quiz
 
-# Project-level vocabulary a brand-new engineer should internalize
-PROJECT_GLOSSARY: list[dict[str, str]] = [
+# Tagged glossary — only terms whose tags match this PR's areas/files are shown.
+TERM_BANK: list[dict[str, Any]] = [
     {
         "term": "pre-flight",
+        "tags": {"proxy", "interceptor", "api"},
         "definition": (
             "Inspecting/normalizing an outbound LLM request BEFORE any bytes "
-            "leave your network toward OpenAI/Anthropic. This is the choke point."
+            "leave your network toward OpenAI/Anthropic."
         ),
+        "near_miss": "Running pytest after the provider already returned a response",
     },
     {
         "term": "proxy / gateway",
+        "tags": {"proxy", "api", "security"},
         "definition": (
-            "A service that sits between the user and the public AI API. "
-            "Clients talk to YOUR gateway; the gateway talks to the AI provider."
+            "A service between clients and public LLM APIs so outbound prompts "
+            "can be inspected and controlled."
         ),
-    },
-    {
-        "term": "FastAPI",
-        "definition": (
-            "A Python web framework for building HTTP APIs. Routes like "
-            "POST /v1/chat/completions are defined here."
-        ),
-    },
-    {
-        "term": "async / await",
-        "definition": (
-            "Python concurrency style that lets the server handle many requests "
-            "while waiting on network I/O (e.g. calling OpenAI) without blocking."
-        ),
-    },
-    {
-        "term": "environment variable",
-        "definition": (
-            "A secret or config value injected at runtime (e.g. OPENAI_API_KEY). "
-            "Never commit real keys into git."
-        ),
-    },
-    {
-        "term": "PII",
-        "definition": (
-            "Personally Identifiable Information — names, emails, card numbers, "
-            "etc. Phase 2 of this project redacts PII before prompts leave."
-        ),
+        "near_miss": "A static file CDN that only caches images",
     },
     {
         "term": "provider adapter",
+        "tags": {"proxy", "api"},
         "definition": (
-            "Code that translates our internal request shape into OpenAI's or "
-            "Anthropic's specific API format."
+            "Code that maps our internal request shape to OpenAI's or Anthropic's API."
         ),
+        "near_miss": "A React component that renders chat bubbles",
+    },
+    {
+        "term": "FastAPI",
+        "tags": {"proxy", "api"},
+        "definition": (
+            "Python web framework used for gateway routes like POST /v1/chat/completions."
+        ),
+        "near_miss": "The Next.js App Router used only by the review dashboard",
+    },
+    {
+        "term": "interceptor",
+        "tags": {"proxy", "interceptor"},
+        "definition": (
+            "The pre-flight hook (`intercept_outbound_request`) that validates/"
+            "normalizes bodies before provider adapters run."
+        ),
+        "near_miss": "A GitHub Action that only posts commit statuses",
+    },
+    {
+        "term": "Governance Quiz",
+        "tags": {"dashboard", "governance", "quiz"},
+        "definition": (
+            "GitHub commit-status check set to pending by CI and flipped to success "
+            "only after you pass Step 6 on the dashboard."
+        ),
+        "near_miss": "A Vercel build badge that turns green when npm install finishes",
+    },
+    {
+        "term": "comprehension gate",
+        "tags": {"governance", "quiz", "dashboard"},
+        "definition": (
+            "Step 6 of the guardrail suite: study guide + quiz you must pass before "
+            "Approve & Merge unlocks."
+        ),
+        "near_miss": "Step 1 AST scan that only checks nested loop depth",
     },
     {
         "term": "AST",
+        "tags": {"governance", "ast"},
         "definition": (
-            "Abstract Syntax Tree — a structured tree of your code (functions, "
-            "loops, calls) used by Step 1 to catch bad structure without running it."
+            "Abstract Syntax Tree — structured parse of source used to catch bad "
+            "structure (e.g. nested loops) without executing the code."
         ),
+        "near_miss": "A runtime profiler that only measures HTTP latency",
+    },
+    {
+        "term": "Upstash Redis",
+        "tags": {"dashboard", "store"},
+        "definition": (
+            "Serverless Redis used by the Vercel dashboard to persist review/quiz state "
+            "(no local disk writes)."
+        ),
+        "near_miss": "Postgres audit log planned for Phase 3 of the proxy",
+    },
+    {
+        "term": "reviewer secret",
+        "tags": {"dashboard", "auth"},
+        "definition": (
+            "Shared password (`GOVERNANCE_DASHBOARD_SECRET` / reviewer secret) required "
+            "to submit the quiz and take human approve/merge actions."
+        ),
+        "near_miss": "The public GitHub Actions run ID printed in CI logs",
+    },
+    {
+        "term": "commit status",
+        "tags": {"dashboard", "github", "quiz"},
+        "definition": (
+            "Per-commit GitHub Checks API state (pending/success/failure) that branch "
+            "protection can require before merge."
+        ),
+        "near_miss": "A label applied to the PR title for triage",
+    },
+    {
+        "term": "environment variable",
+        "tags": {"security", "config", "dashboard", "proxy"},
+        "definition": (
+            "Runtime config/secret (e.g. OPENAI_API_KEY) injected by the host — never "
+            "committed as source."
+        ),
+        "near_miss": "A constant string literal checked into the repo for convenience",
+    },
+    {
+        "term": "PII",
+        "tags": {"security", "proxy"},
+        "definition": (
+            "Personally Identifiable Information — later phases redact it before "
+            "prompts leave the network."
+        ),
+        "near_miss": "Public package names listed in requirements.txt",
+    },
+    {
+        "term": "node:vm",
+        "tags": {"dashboard", "coding", "quiz"},
+        "definition": (
+            "Node sandbox used by the dashboard to re-grade coding-challenge "
+            "submissions server-side with a short timeout."
+        ),
+        "near_miss": "The browser MiniCodeEditor textarea that only stores draft text",
     },
 ]
 
@@ -145,38 +216,190 @@ def _extract_python_symbols(path: Path) -> dict[str, Any]:
     return info
 
 
-def _detect_manual_tasks(paths: list[Path], symbols: dict[str, dict]) -> list[str]:
-    tasks: list[str] = []
-    joined = " ".join(str(p) for p in paths).lower()
+def _extract_ts_symbols(path: Path) -> dict[str, Any]:
+    """Lightweight TS/JS export/function scan (regex — no nested AST walks)."""
+    info: dict[str, Any] = {"imports": [], "functions": [], "async_functions": [], "classes": []}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return info
 
-    if "interceptor.py" in joined:
+    for m in re.finditer(
+        r"""from\s+['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)""",
+        text,
+    ):
+        mod = m.group(1) or m.group(2) or ""
+        top = mod.split("/")[0].lstrip("@") if mod.startswith("@") else mod.split("/")[0]
+        if top and not top.startswith("."):
+            info["imports"].append(top)
+
+    for m in re.finditer(
+        r"(?:export\s+)?(?P<async>async\s+)?function\s+(?P<name>[A-Za-z_][\w]*)\s*\((?P<args>[^)]*)\)",
+        text,
+    ):
+        args = [a.strip().split(":")[0].strip() for a in m.group("args").split(",") if a.strip()]
+        args = [a for a in args if a and a != "this"]
+        entry = {"name": m.group("name"), "args": args, "lineno": text[: m.start()].count("\n") + 1, "doc": ""}
+        if m.group("async"):
+            info["async_functions"].append(entry)
+        else:
+            info["functions"].append(entry)
+
+    for m in re.finditer(
+        r"export\s+(?:async\s+)?function\s+(?P<name>[A-Za-z_][\w]*)",
+        text,
+    ):
+        # already captured above when `function` form matches
+        _ = m
+
+    for m in re.finditer(
+        r"export\s+(?:const|let|var)\s+(?P<name>[A-Za-z_][\w]*)\s*=\s*(?P<async>async\s*)?\(",
+        text,
+    ):
+        entry = {
+            "name": m.group("name"),
+            "args": [],
+            "lineno": text[: m.start()].count("\n") + 1,
+            "doc": "",
+        }
+        if m.group("async"):
+            info["async_functions"].append(entry)
+        else:
+            info["functions"].append(entry)
+
+    info["imports"] = sorted(set(info["imports"]))
+    return info
+
+
+def _read_npm_deps(root: Path | None) -> list[str]:
+    if root is None:
+        return []
+    pkg = root / "dashboard" / "package.json"
+    if not pkg.is_file():
+        return []
+    try:
+        data = json.loads(pkg.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    deps = {**(data.get("dependencies") or {}), **(data.get("devDependencies") or {})}
+    return sorted(deps.keys())
+
+
+def _areas_for_files(rels: list[str]) -> set[str]:
+    areas: set[str] = set()
+    for rel in rels:
+        low = rel.replace("\\", "/").lower()
+        if "interceptor" in low:
+            areas.add("interceptor")
+        if "/proxy/" in low or low.startswith("app/proxy"):
+            areas.add("proxy")
+        if "dashboard" in low:
+            areas.add("dashboard")
+        if "governance" in low:
+            areas.add("governance")
+        if "ast_guardrail" in low or "/ast" in low:
+            areas.add("ast")
+        if "comprehension" in low or "quiz" in low or "codinggrade" in low:
+            areas.add("quiz")
+        if "/security/" in low or "auth.ts" in low:
+            areas.add("security")
+        if "store.ts" in low or "redis" in low:
+            areas.add("store")
+        if "github.ts" in low or "statuses" in low:
+            areas.add("github")
+        if low.startswith("app/api") or "/api/" in low:
+            areas.add("api")
+        if "config" in low or ".env" in low:
+            areas.add("config")
+        if "minicodeeditor" in low or "coding" in low:
+            areas.add("coding")
+        if low.endswith(".tsx") or low.endswith(".ts"):
+            areas.add("dashboard")
+    if not areas:
+        areas.add("general")
+    return areas
+
+
+def _scan_security_hints(paths: list[Path], root: Path | None) -> list[str]:
+    hints: list[str] = []
+    patterns = [
+        (re.compile(r"API_KEY\s*=\s*[\"']sk-"), "Hardcoded API key literal in source"),
+        (re.compile(r"eval\s*\("), "Use of eval() — arbitrary code execution risk"),
+        (re.compile(r"sessionStorage|localStorage"), "Browser storage of potentially sensitive data"),
+        (re.compile(r"Authorization.*Bearer|GITHUB_TOKEN"), "GitHub/token authorization handling"),
+        (re.compile(r"password|secret|token", re.I), "Secret/password/token handling"),
+    ]
+    for path in paths:
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in {".py", ".ts", ".tsx", ".js", ".jsx"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel = _rel(path, root)
+        for rx, label in patterns:
+            if rx.search(text):
+                hints.append(f"{label} (`{rel}`)")
+                break
+    # de-dupe
+    seen: set[str] = set()
+    out: list[str] = []
+    for h in hints:
+        if h not in seen:
+            seen.add(h)
+            out.append(h)
+    return out[:8]
+
+
+def _detect_manual_tasks(
+    paths: list[Path],
+    symbols: dict[str, dict],
+    *,
+    areas: set[str],
+    rels: list[str],
+) -> list[str]:
+    tasks: list[str] = []
+    joined = " ".join(rels).lower()
+
+    if "interceptor" in areas:
         tasks.append(
-            "Human Checkpoint #1: implement `intercept_outbound_request` in "
-            "`app/proxy/interceptor.py` (it currently raises NotImplementedError / 501)."
+            "If `intercept_outbound_request` still raises NotImplementedError / 501, "
+            "implement and test it in `app/proxy/interceptor.py` before claiming the feature."
         )
-    if any(".env" in str(p) or "config.py" in str(p) for p in paths):
+    if "dashboard" in areas:
         tasks.append(
-            "Copy `.env.example` → `.env` and fill real API keys locally "
-            "(never commit `.env`)."
+            "Dashboard: set `GOVERNANCE_DASHBOARD_SECRET` on Vercel to match the GitHub "
+            "repo secret, then redeploy so CI can POST reviews."
+        )
+    if "quiz" in areas or "github" in areas:
+        tasks.append(
+            "After this lands: re-run Governance CI, take the new quiz on the dashboard, "
+            "and ensure the **Governance Quiz** commit status can flip to success "
+            "(needs a GitHub token with statuses:write on Vercel)."
+        )
+    if "store" in areas:
+        tasks.append(
+            "Confirm Upstash Redis is linked on the Vercel project (no disk store on serverless)."
+        )
+    if any(".env" in r or "config" in r for r in rels):
+        tasks.append(
+            "Copy `.env.example` → `.env` locally and fill secrets — never commit `.env`."
         )
     if "dockerfile" in joined or "fly.toml" in joined or "render.yaml" in joined:
         tasks.append(
-            "If deploying: set secrets in the host dashboard (Fly/Render), not in git."
+            "If deploying the proxy: set secrets in the host dashboard (Fly/Render), not in git."
         )
-    if "governance" in joined:
+    if "governance" in areas:
         tasks.append(
-            "After changing governance rules: run `cd governance && pytest` and "
-            "`ai-guardrail run --root ..` before opening a PR."
-        )
-    if "dashboard" in joined:
-        tasks.append(
-            "Dashboard: `cd dashboard && npm install && npm run dev`. "
-            "Set GOVERNANCE_DASHBOARD_SECRET (+ GITHUB_TOKEN for merge)."
+            "After changing governance rules: `cd governance && pytest` and "
+            "`ai-guardrail run --root ..` before opening/updating the PR."
         )
 
-    # NotImplemented / TODO markers
     for path, meta in symbols.items():
-        for fn in meta.get("functions", []) + meta.get("async_functions", []):
+        fn_list = meta.get("functions", []) + meta.get("async_functions", [])
+        for fn in fn_list:
             if "notimplemented" in (fn.get("doc") or "").lower():
                 tasks.append(
                     f"Finish incomplete function `{fn['name']}` in `{path}` "
@@ -184,24 +407,24 @@ def _detect_manual_tasks(paths: list[Path], symbols: dict[str, dict]) -> list[st
                 )
 
     for path in paths:
-        if not path.is_file() or path.suffix != ".py":
+        if not path.is_file() or path.suffix not in {".py", ".ts", ".tsx"}:
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        rel = path.name
         if "TODO: Human Hands-On Implementation" in text:
             tasks.append(
-                f"There is a human hands-on TODO in `{path.name}` — agents must not "
-                "silently complete it; you implement it."
+                f"There is a human hands-on TODO in `{rel}` — implement it yourself; "
+                "agents must not silently complete it."
             )
         if "NotImplementedError" in text:
             tasks.append(
-                f"`{path.name}` still raises NotImplementedError — the feature is "
-                "scaffolded but not finished."
+                f"`{rel}` still raises NotImplementedError — the feature is scaffolded "
+                "but not finished."
             )
 
-    # de-dupe preserve order
     seen: set[str] = set()
     out: list[str] = []
     for t in tasks:
@@ -209,11 +432,42 @@ def _detect_manual_tasks(paths: list[Path], symbols: dict[str, dict]) -> list[st
             seen.add(t)
             out.append(t)
     if not out:
+        file_hint = ", ".join(rels[:5]) if rels else "these files"
         out.append(
-            "No extra manual checklist detected for this diff — still read the "
-            "study guide and pass the quiz before merging."
+            f"No automated checklist markers in this diff — still read `{file_hint}` "
+            "and pass the quiz before merging."
         )
     return out
+
+
+def _stable_seed(rels: list[str], diff_text: str | None) -> int:
+    material = "\n".join(sorted(rels)) + "\n" + (diff_text or "")[:4000]
+    return int(hashlib.sha256(material.encode("utf-8")).hexdigest()[:12], 16)
+
+
+def _pick_glossary(areas: set[str], *, limit: int = 6) -> list[dict[str, str]]:
+    matched = [t for t in TERM_BANK if areas & set(t["tags"])]
+    if len(matched) < 3:
+        matched = list(TERM_BANK[:5])
+    # Prefer diversity of terms; stable order by term name then truncate
+    matched = sorted(matched, key=lambda t: t["term"])
+    # Rotate by area fingerprint so different PRs surface different vocab first
+    offset = sum(ord(c) for c in "".join(sorted(areas))) % max(len(matched), 1)
+    rotated = matched[offset:] + matched[:offset]
+    out: list[dict[str, str]] = []
+    for t in rotated[:limit]:
+        out.append({"term": t["term"], "definition": t["definition"]})
+    return out
+
+
+def _subsystem_label(areas: set[str]) -> str:
+    if "dashboard" in areas and "proxy" not in areas:
+        return "the governance review dashboard (Next.js on Vercel)"
+    if "proxy" in areas or "interceptor" in areas:
+        return "the Shadow AI Guardrail Gateway (FastAPI proxy)"
+    if "governance" in areas:
+        return "the AI Guardrail governance suite (CI Steps 1–6)"
+    return "this repository's AI governance / gateway stack"
 
 
 def _build_deterministic_pack(
@@ -222,7 +476,10 @@ def _build_deterministic_pack(
     root: Path | None = None,
     diff_text: str | None = None,
 ) -> dict[str, Any]:
-    py_files = [p for p in paths if p.is_file() and p.suffix == ".py"]
+    file_paths = [p for p in paths if p.is_file()]
+    py_files = [p for p in file_paths if p.suffix == ".py"]
+    ts_files = [p for p in file_paths if p.suffix.lower() in {".ts", ".tsx", ".js", ".jsx"}]
+
     symbols: dict[str, dict] = {}
     all_imports: set[str] = set()
     all_fns: list[tuple[str, dict]] = []
@@ -235,82 +492,124 @@ def _build_deterministic_pack(
         for fn in meta["functions"] + meta["async_functions"]:
             all_fns.append((rel, fn))
 
-    changed_names = [_rel(p, root) for p in paths if p.is_file()][:25]
-    manual = _detect_manual_tasks(paths, symbols)
+    for path in ts_files[:40]:
+        rel = _rel(path, root)
+        meta = _extract_ts_symbols(path)
+        symbols[rel] = meta
+        all_imports.update(meta["imports"])
+        for fn in meta["functions"] + meta["async_functions"]:
+            all_fns.append((rel, fn))
+
+    changed_names = [_rel(p, root) for p in file_paths][:30]
+    areas = _areas_for_files(changed_names)
+    manual = _detect_manual_tasks(paths, symbols, areas=areas, rels=changed_names)
+    security_hints = _scan_security_hints(file_paths, root)
+    npm_deps = _read_npm_deps(root) if "dashboard" in areas else []
+    seed = _stable_seed(changed_names, diff_text)
 
     key_functions = []
     for rel, fn in all_fns[:12]:
-        kind = "async function" if fn in symbols.get(rel, {}).get("async_functions", []) else "function"
-        # fix kind detection
         async_names = {f["name"] for f in symbols.get(rel, {}).get("async_functions", [])}
         kind = "async function" if fn["name"] in async_names else "function"
-        plain = fn.get("doc") or (
+        plain = (fn.get("doc") or "").strip() or (
             f"A {kind} named `{fn['name']}` in `{rel}`. "
             f"Arguments: {', '.join(fn['args']) or 'none'}."
         )
         key_functions.append(
-            {
-                "name": fn["name"],
-                "file": rel,
-                "plain_english": plain[:400],
-            }
+            {"name": fn["name"], "file": rel, "plain_english": plain[:400]}
         )
 
-    # Relevant glossary subset + always core terms
-    core_terms = {"pre-flight", "proxy / gateway", "environment variable", "FastAPI"}
-    glossary = [g for g in PROJECT_GLOSSARY if g["term"] in core_terms]
-    # Add more if imports suggest them
-    if "httpx" in all_imports or "fastapi" in all_imports:
-        glossary = PROJECT_GLOSSARY[:6]
-    else:
-        glossary = PROJECT_GLOSSARY[:5]
+    glossary = _pick_glossary(areas)
+    subsystem = _subsystem_label(areas)
 
     elevator = (
-        "This change touches the Shadow AI Guardrail Gateway — an enterprise proxy "
-        "that sits between users and public LLMs so sensitive data can be inspected "
-        "pre-flight. "
-    )
-    if changed_names:
-        elevator += "Files in this change include: " + ", ".join(changed_names[:8]) + "."
-    else:
-        elevator += "Review the study guide to understand what is being proposed."
-
-    bigger = (
-        "Bigger picture: Phase 1 builds the async FastAPI proxy; Phase 2 adds PII "
-        "scrubbing; Phase 3 adds Postgres audit logs; Phase 4 packages with Docker/"
-        "Terraform. The governance suite (this quiz included) gates merges so you "
-        "never ship AI-written code you cannot explain."
-    )
-
-    deps = sorted(all_imports) or ["(no Python imports detected in scanned files)"]
-    security_notes = [
-        "Never commit real API keys — use environment variables.",
-        "The interceptor is the security choke point: bad validation here means "
-        "prompts can leave the network unchecked later.",
-        "Passing Bugbot/Vercel alone is not enough — AST/OWASP/fuzz/copyright + "
-        "this comprehension quiz must clear before merge.",
-    ]
-    if any("secret" in n.lower() or "key" in n.lower() for n in changed_names):
-        security_notes.insert(
-            0,
-            "This diff touches secret/key-related files — double-check nothing "
-            "sensitive is hardcoded.",
+        f"This PR changes {subsystem}. "
+        + (
+            "Files involved: " + ", ".join(changed_names[:8]) + "."
+            if changed_names
+            else "Review the study guide for what is being proposed."
         )
+    )
+
+    bigger_bits = [
+        f"Primary areas touched: {', '.join(sorted(areas))}."
+    ]
+    if "dashboard" in areas:
+        bigger_bits.append(
+            "The dashboard is Step 7 of governance: humans take the Step 6 quiz here "
+            "and approve/merge; it is not the streaming LLM proxy."
+        )
+    if "proxy" in areas or "interceptor" in areas:
+        bigger_bits.append(
+            "The FastAPI gateway is the production choke point for outbound LLM traffic; "
+            "it must not be deployed as a Vercel serverless function."
+        )
+    if "governance" in areas or "quiz" in areas:
+        bigger_bits.append(
+            "CI Steps 1–6 analyze the PR and generate this quiz; merging should stay "
+            "blocked until comprehension (and other required checks) pass."
+        )
+    if not any(k in areas for k in ("dashboard", "proxy", "governance", "quiz")):
+        bigger_bits.append(
+            "Place this change in the wider system: what calls it, what it calls, "
+            "and what breaks if it is wrong."
+        )
+    bigger = " ".join(bigger_bits)
+
+    deps = sorted(all_imports)
+    if npm_deps:
+        deps = sorted(set(deps) | set(npm_deps[:20]))
+    if not deps:
+        deps = ["(no imports detected in scanned files — still name sibling modules this code calls)"]
+
+    security_notes_out: list[str] = []
+    seen_sec: set[str] = set()
+    candidates = list(security_hints[:4])
+    if "dashboard" in areas:
+        candidates.append(
+            "Keep the reviewer secret in memory only in the browser — never sessionStorage."
+        )
+    if "proxy" in areas or "interceptor" in areas:
+        candidates.append(
+            "Bad validation in the interceptor means prompts can leave unchecked — "
+            "treat it as the security choke point."
+        )
+    if "github" in areas or "quiz" in areas:
+        candidates.append(
+            "Tokens used for commit statuses / merge must be scoped narrowly and stored "
+            "as Vercel env vars, not in the repo."
+        )
+    candidates.append(
+        "Never commit real API keys — use environment variables / host secret stores."
+    )
+    for s in candidates:
+        if s not in seen_sec:
+            seen_sec.add(s)
+            security_notes_out.append(s)
 
     study_guide = {
         "elevator_pitch": elevator,
         "bigger_picture": bigger,
         "glossary": glossary,
         "key_functions": key_functions,
-        "dependencies": deps,
+        "dependencies": deps[:24],
         "manual_dev_tasks": manual,
-        "security_notes": security_notes,
+        "security_notes": security_notes_out[:6],
         "files_touched": changed_names,
+        "areas": sorted(areas),
         "diff_chars": len(diff_text or ""),
     }
 
     questions = _make_questions(
-        study_guide, all_fns, all_imports, paths=paths, root=root
+        study_guide,
+        all_fns,
+        all_imports,
+        paths=paths,
+        root=root,
+        areas=areas,
+        seed=seed,
+        npm_deps=npm_deps,
+        security_hints=security_hints,
     )
     return {
         "learner_level": "absolute_beginner",
@@ -330,17 +629,534 @@ def _q(
     explanation: str,
     *,
     format: str = "text",
+    seed: int = 0,
 ) -> dict[str, Any]:
+    """Build a question and shuffle choices (stable per qid+seed)."""
+    rng = random.Random(f"{seed}:{qid}")
+    indexed = list(enumerate(choices))
+    rng.shuffle(indexed)
+    shuffled = [c for _, c in indexed]
+    new_answer = next(i for i, (old_i, _) in enumerate(indexed) if old_i == answer_index)
     return {
         "id": qid,
         "category": category,
         "category_label": CATEGORY_LABELS.get(category, category),
         "prompt": prompt,
-        "choices": choices,
-        "answer_index": answer_index,
+        "choices": shuffled,
+        "answer_index": new_answer,
         "explanation": explanation,
         "format": format,
     }
+
+
+def _other_files(files: list[str], correct: str, n: int = 3) -> list[str]:
+    others = [f for f in files if f != correct]
+    if len(others) >= n:
+        return others[:n]
+    fillers = [
+        "app/main.py",
+        "dashboard/src/app/page.tsx",
+        "governance/governance/cli.py",
+        "app/proxy/providers/openai.py",
+        "tests/test_health.py",
+    ]
+    out = list(others)
+    for f in fillers:
+        if f != correct and f not in out:
+            out.append(f)
+        if len(out) >= n:
+            break
+    return out[:n]
+
+
+def _other_fns(fns: list[tuple[str, dict]], correct: str, n: int = 3) -> list[str]:
+    names = []
+    for _, fn in fns:
+        name = fn["name"]
+        if name != correct and name not in names:
+            names.append(name)
+    fillers = [
+        "intercept_outbound_request",
+        "gradeComprehension",
+        "parseGithubRepo",
+        "setGovernanceQuizStatus",
+        "collect_paths",
+        "run_ast_guardrail",
+    ]
+    for f in fillers:
+        if f != correct and f not in names:
+            names.append(f)
+        if len(names) >= n:
+            break
+    return names[:n]
+
+
+def _fake_packages(real: set[str], n: int = 3) -> list[str]:
+    candidates = [
+        "django",
+        "flask",
+        "express",
+        "mongodb",
+        "pytorch",
+        "tensorflow",
+        "rails",
+        "laravel",
+        "spring-boot",
+        "kafka",
+        "selenium",
+        "jquery",
+    ]
+    out = [c for c in candidates if c not in real]
+    return out[:n]
+
+
+def _build_mc_pool(
+    guide: dict[str, Any],
+    all_fns: list[tuple[str, dict]],
+    imports: set[str],
+    *,
+    areas: set[str],
+    seed: int,
+    npm_deps: list[str],
+    security_hints: list[str],
+) -> list[dict[str, Any]]:
+    """Candidate MC questions grounded in this PR (caller selects a subset)."""
+    pool: list[dict[str, Any]] = []
+    files = list(guide.get("files_touched") or [])
+    glossary = list(guide.get("glossary") or [])
+    tasks = list(guide.get("manual_dev_tasks") or [])
+    deps = list(guide.get("dependencies") or [])
+    key_fns = list(guide.get("key_functions") or [])
+    security_notes = list(guide.get("security_notes") or [])
+
+    # --- Vocabulary (from this PR's glossary) ---
+    for i, g in enumerate(glossary[:4]):
+        term = g["term"]
+        bank = next((t for t in TERM_BANK if t["term"] == term), None)
+        near = bank["near_miss"] if bank else "An unrelated CI badge with no merge effect"
+        other_defs = [
+            x["definition"]
+            for x in glossary
+            if x["term"] != term
+        ][:2]
+        while len(other_defs) < 2:
+            other_defs.append(
+                "A marketing slogan with no technical meaning in this codebase"
+            )
+        choices = [g["definition"], near, other_defs[0], other_defs[1]]
+        pool.append(
+            _q(
+                f"vocab_{re.sub(r'[^a-z0-9]+', '_', term.lower())[:40]}",
+                "vocabulary",
+                f"In **this PR’s study guide**, what does **{term}** mean?",
+                choices,
+                0,
+                f"See the vocabulary entry for `{term}` — it was included because this "
+                f"change touches: {', '.join(sorted(areas))}.",
+                seed=seed + i,
+            )
+        )
+
+    # --- Functions / files ---
+    if key_fns:
+        kf = key_fns[0]
+        distractor_files = _other_files(files or [kf["file"]], kf["file"])
+        pool.append(
+            _q(
+                f"fn_where_{kf['name'][:32]}",
+                "functions",
+                f"Which file in this change defines `{kf['name']}`?",
+                [kf["file"], *distractor_files],
+                0,
+                f"`{kf['name']}` is listed under Key functions for `{kf['file']}`.",
+                seed=seed + 11,
+            )
+        )
+        if kf.get("plain_english"):
+            wrong_descs = [
+                f"Legacy helper kept only for docs examples — not called from `{kf['file']}`",
+                f"Test fixture factory used exclusively under `tests/`, unrelated to `{kf['file']}`",
+                f"Provider adapter that talks to Anthropic — different module from `{kf['name']}`",
+            ]
+            # Prefer other key-function descriptions as near-miss distractors
+            for other in key_fns[1:4]:
+                if other.get("plain_english"):
+                    wrong_descs.insert(0, other["plain_english"][:200])
+            pool.append(
+                _q(
+                    f"fn_role_{kf['name'][:32]}",
+                    "functions",
+                    f"What is the role of `{kf['name']}` in `{kf['file']}`?",
+                    [kf["plain_english"][:220], *wrong_descs[:3]],
+                    0,
+                    f"From the study guide key-functions section for `{kf['name']}`.",
+                    seed=seed + 12,
+                )
+            )
+
+    if len(all_fns) >= 1:
+        rel, fn = all_fns[min(1, len(all_fns) - 1)]
+        arg_str = ", ".join(fn["args"]) if fn["args"] else "(no parameters)"
+        wrong_args = [
+            "request, response, session, cookie_jar",
+            "(no parameters)",
+            "argc, argv",
+        ]
+        if arg_str in wrong_args:
+            wrong_args = [w for w in wrong_args if w != arg_str]
+            wrong_args.append("owner, repo, pull_number, merge_method")
+        pool.append(
+            _q(
+                f"fn_args_{fn['name'][:32]}",
+                "how_it_works",
+                f"What parameters does `{fn['name']}` (in `{rel}`) take?",
+                [arg_str, *wrong_args[:3]],
+                0,
+                f"Signature scan of `{rel}` shows args: {arg_str}.",
+                seed=seed + 13,
+            )
+        )
+
+    if len(files) >= 1:
+        focus = files[0]
+        area_guess = sorted(_areas_for_files([focus]))
+        correct = (
+            f"It is part of this PR’s change set — you should be able to explain why "
+            f"`{focus}` was modified ({', '.join(area_guess)})."
+        )
+        pool.append(
+            _q(
+                "file_focus_primary",
+                "how_it_works",
+                f"Why does `{focus}` matter for reviewing this PR?",
+                [
+                    correct,
+                    "It is listed only because CI scanned the whole monorepo — ignore it",
+                    f"It is superseded by an identically named file under `vendor/` and unused",
+                    "Behavioral changes here cannot affect quiz grading or gateway traffic",
+                ],
+                0,
+                f"`{focus}` is in files_touched for this comprehension pack.",
+                seed=seed + 14,
+            )
+        )
+
+    # --- Bigger picture / subsystem ---
+    subsystem = _subsystem_label(areas)
+    wrong_systems = [
+        "a mobile-only React Native client with no server component",
+        "a Terraform-only repo with no application code",
+        "an unrelated LeetCode solutions dump",
+    ]
+    if "dashboard" in areas:
+        wrong_systems[0] = (
+            "the streaming FastAPI LLM proxy that must not run on Vercel serverless"
+        )
+    elif "proxy" in areas:
+        wrong_systems[0] = (
+            "the Next.js governance dashboard hosted on Vercel for quiz/approve only"
+        )
+    pool.append(
+        _q(
+            "pic_subsystem",
+            "bigger_picture",
+            "Which subsystem does this PR primarily change?",
+            [subsystem, *wrong_systems],
+            0,
+            f"Areas detected from paths: {', '.join(sorted(areas))}.",
+            seed=seed + 20,
+        )
+    )
+
+    if "dashboard" in areas and "quiz" in areas:
+        pool.append(
+            _q(
+                "pic_quiz_gate",
+                "bigger_picture",
+                "For this dashboard/quiz change, what must happen before merge is safe?",
+                [
+                    "Pass the Step 6 comprehension quiz (and required GitHub checks) for this commit",
+                    "Only wait for a green Vercel build — quiz score does not matter",
+                    "Merge immediately so CI can generate the quiz afterward",
+                    "Disable branch protection until the next release",
+                ],
+                0,
+                "This PR’s areas include dashboard/quiz — comprehension is a merge gate.",
+                seed=seed + 21,
+            )
+        )
+    elif "proxy" in areas or "interceptor" in areas:
+        pool.append(
+            _q(
+                "pic_proxy_role",
+                "bigger_picture",
+                "Where does this proxy/interceptor change sit in the request path?",
+                [
+                    "Client → gateway route → interceptor/pre-flight → provider adapter → upstream LLM",
+                    "Client → OpenAI directly, skipping the gateway entirely",
+                    "Client → governance dashboard quiz → merge button → LLM",
+                    "Client → Upstash Redis only, with no HTTP API",
+                ],
+                0,
+                "Gateway changes affect the pre-flight path before provider adapters.",
+                seed=seed + 21,
+            )
+        )
+    elif "governance" in areas:
+        pool.append(
+            _q(
+                "pic_governance_role",
+                "bigger_picture",
+                "What is the job of this governance-suite change?",
+                [
+                    "Analyze the PR in CI and/or generate the comprehension materials that gate merge",
+                    "Stream tokens from Anthropic to browsers",
+                    "Replace the need for any human review forever",
+                    "Host production LLM traffic on Vercel edge functions",
+                ],
+                0,
+                "Governance Steps 1–6 are CI analysis + comprehension, not the LLM proxy.",
+                seed=seed + 21,
+            )
+        )
+
+    # --- Dependencies ---
+    real_dep = None
+    for d in deps:
+        if d and not d.startswith("("):
+            real_dep = d
+            break
+    if real_dep:
+        fakes = _fake_packages(set(deps) | set(npm_deps), 3)
+        pool.append(
+            _q(
+                f"dep_has_{re.sub(r'[^a-z0-9]+', '_', real_dep.lower())[:24]}",
+                "dependencies",
+                "Which dependency/import shows up in the files scanned for this PR?",
+                [real_dep, *fakes],
+                0,
+                f"Detected from changed sources: {', '.join(deps[:10])}.",
+                seed=seed + 30,
+            )
+        )
+    if npm_deps and "dashboard" in areas:
+        pick = npm_deps[seed % len(npm_deps)]
+        fakes = _fake_packages(set(npm_deps), 3)
+        pool.append(
+            _q(
+                "dep_npm_dashboard",
+                "dependencies",
+                "Which package is declared for the dashboard (`dashboard/package.json`) "
+                "and may matter for this change?",
+                [pick, *fakes],
+                0,
+                f"From dashboard package.json dependencies (sample relevant to this PR).",
+                seed=seed + 31,
+            )
+        )
+    if files:
+        pool.append(
+            _q(
+                "dep_sibling",
+                "dependencies",
+                "When reviewing dependencies for this change, what should you verify?",
+                [
+                    "Imports/modules these files use and sibling project files they call at runtime",
+                    "Only whether the README badge color changed",
+                    "Only the number of commits on the branch",
+                    "Only whether the PR title contains an emoji",
+                ],
+                0,
+                f"This PR touches {len(files)} file(s); check their real import graph.",
+                seed=seed + 32,
+            )
+        )
+
+    # --- Manual tasks ---
+    if tasks:
+        task = tasks[0]
+        short = task if len(task) < 180 else task[:177] + "…"
+        pool.append(
+            _q(
+                "manual_primary",
+                "manual_tasks",
+                "Which manual follow-up applies to **this** PR according to the study guide?",
+                [
+                    short,
+                    "Only re-run Bugbot — skip dashboard secrets, Redis, and local pytest",
+                    "Merge first, then generate the study guide on `main` afterward",
+                    "Treat env/config changes as optional documentation-only edits",
+                ],
+                0,
+                "Taken from this pack’s manual_dev_tasks — not a generic checklist.",
+                seed=seed + 40,
+            )
+        )
+    if any("NotImplemented" in t or "hands-on" in t.lower() for t in tasks):
+        pool.append(
+            _q(
+                "manual_nyi",
+                "manual_tasks",
+                "This PR’s checklist mentions unfinished / NotImplemented work. What should you do?",
+                [
+                    "Implement or explicitly track it yourself before treating the feature as done",
+                    "Leave the stub shipped and rely on upstream adapters to validate instead",
+                    "Comment out the function so CI stops reporting the NotImplementedError",
+                    "Mark the PR as docs-only so branch protection ignores the stub",
+                ],
+                0,
+                "Human checkpoints exist so you learn the choke points — do not rubber-stamp stubs.",
+                seed=seed + 41,
+            )
+        )
+
+    # --- Security ---
+    if security_hints:
+        hint = security_hints[0]
+        pool.append(
+            _q(
+                "sec_hint_primary",
+                "security",
+                "Which security concern did the scanner flag in **this** change set?",
+                [
+                    hint,
+                    "Only outdated npm patch versions with no secret or auth impact",
+                    "Missing alt text on a decorative dashboard SVG",
+                    "A flaky unit test timeout unrelated to auth or data egress",
+                ],
+                0,
+                "Derived from scanning the files in this PR.",
+                seed=seed + 50,
+            )
+        )
+    if security_notes:
+        note = security_notes[0]
+        near_wrong = [
+            "Hardcode provider keys in source so local demos need no `.env`",
+            "Persist the reviewer secret in sessionStorage across reloads",
+            "Allow unauthenticated merge actions when the suite is green",
+        ]
+        pool.append(
+            _q(
+                "sec_note_primary",
+                "security",
+                "Which security note is attached to **this** PR’s study guide?",
+                [note, *near_wrong],
+                0,
+                "From this pack’s security_notes (area-specific).",
+                seed=seed + 51,
+            )
+        )
+    if "dashboard" in areas:
+        pool.append(
+            _q(
+                "sec_dashboard_secret",
+                "security",
+                "For this dashboard change, how should the reviewer secret be handled in the browser?",
+                [
+                    "Keep it in process memory for the session — never sessionStorage/localStorage",
+                    "Write it to sessionStorage so refresh keeps you logged in forever",
+                    "Commit it into `dashboard/src/lib/auth.ts` as a default string",
+                    "Print it into the public PR description for teammates",
+                ],
+                0,
+                "CodeQL and the dashboard design forbid clear-text web storage of the secret.",
+                seed=seed + 52,
+            )
+        )
+    if "proxy" in areas or "interceptor" in areas:
+        pool.append(
+            _q(
+                "sec_interceptor",
+                "security",
+                "Why is the interceptor a security-sensitive part of this change?",
+                [
+                    "It is the pre-flight choke point — weak validation lets prompts leave unchecked",
+                    "It only renames CSS classes and cannot affect outbound data",
+                    "It runs exclusively after the upstream LLM response is discarded",
+                    "It is unused legacy code with no callers",
+                ],
+                0,
+                "Proxy/interceptor areas make outbound validation the critical review focus.",
+                seed=seed + 52,
+            )
+        )
+
+    return pool
+
+
+def _select_mc_questions(pool: list[dict[str, Any]], *, seed: int, target: int = 8) -> list[dict[str, Any]]:
+    """Pick ~target MC questions covering categories; vary by PR seed."""
+    rng = random.Random(seed)
+    by_cat: dict[str, list[dict[str, Any]]] = {}
+    for q in pool:
+        by_cat.setdefault(q["category"], []).append(q)
+
+    preferred = [
+        "vocabulary",
+        "functions",
+        "how_it_works",
+        "bigger_picture",
+        "dependencies",
+        "manual_tasks",
+        "security",
+    ]
+    selected: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for cat in preferred:
+        options = by_cat.get(cat) or []
+        if not options:
+            continue
+        pick = options[rng.randrange(len(options))]
+        if pick["id"] not in seen_ids:
+            selected.append(pick)
+            seen_ids.add(pick["id"])
+
+    leftovers = [q for q in pool if q["id"] not in seen_ids]
+    rng.shuffle(leftovers)
+    for q in leftovers:
+        if len(selected) >= target:
+            break
+        selected.append(q)
+        seen_ids.add(q["id"])
+
+    # If still short, keep what we have (coding challenges pad the quiz)
+    rng.shuffle(selected)
+    # Re-order: keep category diversity visible — vocabulary/functions first-ish
+    # but still vary by rotating with seed
+    rotate = seed % max(len(selected), 1)
+    selected = selected[rotate:] + selected[:rotate]
+    return selected[:target]
+
+
+def _make_questions(
+    guide: dict[str, Any],
+    all_fns: list[tuple[str, dict]],
+    imports: set[str],
+    *,
+    paths: list[Path] | None = None,
+    root: Path | None = None,
+    areas: set[str] | None = None,
+    seed: int = 0,
+    npm_deps: list[str] | None = None,
+    security_hints: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    areas = areas or set(guide.get("areas") or ["general"])
+    pool = _build_mc_pool(
+        guide,
+        all_fns,
+        imports,
+        areas=areas,
+        seed=seed,
+        npm_deps=npm_deps or [],
+        security_hints=security_hints or [],
+    )
+    questions = _select_mc_questions(pool, seed=seed, target=8)
+    questions.extend(
+        _make_coding_questions(paths or [], root=root, all_fns=all_fns)
+    )
+    return questions
 
 
 def _truncate_code(text: str, limit: int = 700) -> str:
@@ -670,227 +1486,6 @@ def _make_coding_questions(
 
     assert len(selected) >= 2
     return selected
-
-
-def _make_questions(
-    guide: dict[str, Any],
-    all_fns: list[tuple[str, dict]],
-    imports: set[str],
-    *,
-    paths: list[Path] | None = None,
-    root: Path | None = None,
-) -> list[dict[str, Any]]:
-    questions: list[dict[str, Any]] = []
-
-    # Vocabulary
-    questions.append(
-        _q(
-            "vocab_preflight",
-            "vocabulary",
-            "What does **pre-flight** mean in this project?",
-            [
-                "Running unit tests after deploying to production",
-                "Inspecting/normalizing an LLM request BEFORE it leaves your network",
-                "Formatting Python code with Black",
-                "Buying a plane ticket for an on-call engineer",
-            ],
-            1,
-            "Pre-flight is the choke point: validate/scrub before any upstream provider call.",
-        )
-    )
-    questions.append(
-        _q(
-            "vocab_gateway",
-            "vocabulary",
-            "What is the Shadow AI **gateway**?",
-            [
-                "A React weather app",
-                "A CDN that caches images",
-                "A proxy between users and public LLM APIs that can inspect outbound prompts",
-                "A database of LeetCode solutions",
-            ],
-            2,
-            "It is an enterprise security proxy for outbound LLM traffic.",
-        )
-    )
-
-    # Bigger picture
-    questions.append(
-        _q(
-            "pic_phases",
-            "bigger_picture",
-            "Which statement matches the 12-month plan?",
-            [
-                "Skip scrubbing and go straight to Terraform on day one",
-                "Phase 1 proxy → Phase 2 scrubbing → Phase 3 Postgres audit → Phase 4 Docker/Terraform",
-                "Only build a Next.js marketing site",
-                "Host the streaming proxy on Vercel serverless",
-            ],
-            1,
-            "Crawl → Walk → Run → Cloud. Vercel is forbidden for the streaming proxy.",
-        )
-    )
-    questions.append(
-        _q(
-            "pic_why_quiz",
-            "bigger_picture",
-            "Why does this comprehension quiz exist before merge?",
-            [
-                "GitHub requires emojis on every PR",
-                "So you can rubber-stamp AI code without reading it",
-                "Because merging code you cannot explain is dangerous — you must understand it first",
-                "To replace writing tests forever",
-            ],
-            2,
-            "You are learning; AI wrote a lot of this. Understanding is the resume-defense gate.",
-        )
-    )
-
-    # How it works / functions
-    if all_fns:
-        rel, fn = all_fns[0]
-        questions.append(
-            _q(
-                "fn_primary",
-                "functions",
-                f"In this change, what is `{fn['name']}` (in `{rel}`)?",
-                [
-                    f"A {('async ' if fn['name'] in {x['name'] for _, x in all_fns} else '')}function defined in this codebase that you should be able to explain",
-                    "A built-in Python keyword like `if`",
-                    "An AWS region name",
-                    "A CSS class in the dashboard",
-                ],
-                0,
-                f"`{fn['name']}` is application code in `{rel}`. Args: {', '.join(fn['args']) or 'none'}.",
-            )
-        )
-    else:
-        questions.append(
-            _q(
-                "fn_interceptor",
-                "functions",
-                "Where should outbound LLM requests be validated pre-flight?",
-                [
-                    "In a random CSS file",
-                    "Inside `app/proxy/interceptor.py` via `intercept_outbound_request`",
-                    "Only on the user's phone",
-                    "After the response returns from OpenAI",
-                ],
-                1,
-                "Checkpoint #1 is the interceptor — before any provider adapter runs.",
-            )
-        )
-
-    questions.append(
-        _q(
-            "how_flow",
-            "how_it_works",
-            "Roughly, what is the happy-path request flow for the gateway?",
-            [
-                "Browser → OpenAI directly (gateway unused)",
-                "Client → Gateway route → interceptor → provider adapter → upstream LLM → stream back",
-                "Client → Postgres → Terraform → done",
-                "Client → Bugbot → Vercel → merge",
-            ],
-            1,
-            "The gateway owns the path; providers are adapters behind the interceptor.",
-        )
-    )
-
-    # Dependencies
-    dep_choice_correct = (
-        "Libraries/modules this code imports or relies on (e.g. FastAPI, httpx) "
-        "plus sibling project files it calls"
-    )
-    questions.append(
-        _q(
-            "dep_meaning",
-            "dependencies",
-            "When we say **dependencies** for a change, what should you check?",
-            [
-                "Only the color of the README badge",
-                dep_choice_correct,
-                "Whether the moon is full",
-                "Only the number of emojis in the commit message",
-            ],
-            1,
-            f"Detected imports in this scan: {', '.join(sorted(imports)[:12]) or 'none yet'}.",
-        )
-    )
-
-    # Manual tasks
-    tasks = guide.get("manual_dev_tasks") or []
-    has_checkpoint = any("Checkpoint" in t or "NotImplemented" in t for t in tasks)
-    questions.append(
-        _q(
-            "manual_checkpoint",
-            "manual_tasks",
-            "If a file has `TODO: Human Hands-On Implementation` or `NotImplementedError`, what should you do?",
-            [
-                "Ignore it and merge anyway",
-                "Ask an agent to silently fill it with no learning",
-                "Treat it as YOUR job — implement/understand it before claiming the resume bullet",
-                "Delete the whole repository",
-            ],
-            2,
-            "The ledger forbids agents from auto-completing human checkpoints.",
-        )
-    )
-    if has_checkpoint:
-        questions.append(
-            _q(
-                "manual_env",
-                "manual_tasks",
-                "Where do real API keys belong?",
-                [
-                    "Committed into GitHub so teammates can see them",
-                    "Hardcoded in interceptor.py",
-                    "In local `.env` / host secret stores — never in git",
-                    "In a public Discord channel",
-                ],
-                2,
-                "Secrets only via environment variables (§8 of the Ledger).",
-            )
-        )
-
-    # Security
-    questions.append(
-        _q(
-            "sec_keys",
-            "security",
-            "Which is a security red flag in a PR?",
-            [
-                "Using pydantic-settings to read env vars",
-                "A hardcoded `API_KEY = \"sk-...\"` string in source",
-                "Adding a `/health` endpoint",
-                "Writing a README",
-            ],
-            1,
-            "Hardcoded secrets are critical findings in the OWASP auditor.",
-        )
-    )
-    questions.append(
-        _q(
-            "sec_why_gate",
-            "security",
-            "Why is reviewing AI-generated code without understanding it dangerous?",
-            [
-                "It isn't — AI is always correct",
-                "You might approve insecure, wrong, or unmaintainable logic you cannot defend in an interview or outage",
-                "GitHub will revoke your account for reading code",
-                "Tests become illegal",
-            ],
-            1,
-            "This quiz exists so 'human review' means informed review, not a blind click.",
-        )
-    )
-
-    # Q11–Q12: coding problems grounded in this PR's code
-    questions.extend(
-        _make_coding_questions(paths or [], root=root, all_fns=all_fns)
-    )
-
-    return questions
 
 
 def _llm_enrich(pack: dict[str, Any], diff_text: str) -> dict[str, Any]:
