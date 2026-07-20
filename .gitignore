@@ -1,43 +1,40 @@
-# Environment and secrets
-.env
-.env.local
-.env.*.local
 
-# Python
-__pycache__/
-*.py[cod]
 *$py.class
-*.so
-.Python
-.venv/
-venv/
-ENV/
-env/
-*.egg-info/
-dist/
 build/
-*.egg
-
-# Testing / tooling
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 .coverage
-htmlcov/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Governance / dashboard
-governance/.venv/
-dashboard/node_modules/
-dashboard/.next/
 dashboard/.data/
 dashboard/.env.local
+dashboard/.next/
+dashboard/node_modules/
+dist/
+.DS_Store
+*.egg
+*.egg-info/
+.env
+env/
+ENV/
+# Environment and secrets
+.env.*.local
+.env.local
+# Governance / dashboard
+governance/.venv/
+htmlcov/
+# IDE
+.idea/
+.mypy_cache/
+# OS
+.pr-drafts/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Python
+.Python
+.ruff_cache/
+*.so
+*.swo
+*.swp
+# Testing / tooling
+Thumbs.db
+.venv/
+venv/
+.vscode/

@@ -34,6 +34,37 @@ ai-guardrail run --root . -f app/main.py -f app/proxy/interceptor.py
 ai-guardrail run --root . --changed-only --base-ref origin/main
 ```
 
+## Benchmark target injection
+
+Step 4 remains informational by default, but custom per-PR checks can inject
+specific functions into the profiler:
+
+```python
+from governance.steps.benchmark_engine import BenchmarkTarget, run
+
+
+def changed_helper(data: list[int]) -> int:
+    return sum(data)
+
+
+result = run(
+    targets=[
+        BenchmarkTarget(
+            name="changed_helper",
+            fn=changed_helper,
+            sizes=(10, 100, 1_000),
+            expected="O(N)",
+        )
+    ]
+)
+
+print(result.metrics["injected_profiles"]["changed_helper"])
+```
+
+Injected profiles are reported in `metrics["injected_profiles"]`; they do not
+block merge unless a future caller adds its own policy around the informational
+result.
+
 ## Tests
 
 ```bash

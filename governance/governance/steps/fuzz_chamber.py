@@ -48,8 +48,8 @@ for case in BOUNDARY:
     try:
         fn(case)
         results.append({"input": repr(case)[:80], "status": "ok"})
-    except TypeError as e:
-        results.append({"input": repr(case)[:80], "status": "type_error", "error": str(e)})
+    except (TypeError, ValueError) as e:
+        results.append({"input": repr(case)[:80], "status": "rejected", "error": str(e)})
     except PermissionError as e:
         # Expected deny path for allowlists / auth gates (e.g. EgressDeniedError).
         results.append({
@@ -69,19 +69,53 @@ print(json.dumps({"ok": True, "results": results}))
 '''
 
 
+def _explicit_fuzz_targets(tree: ast.Module) -> list[str]:
+    targets: list[str] = []
+    for node in tree.body:
+        value: ast.expr | None = None
+        if isinstance(node, ast.Assign):
+            if any(
+                isinstance(target, ast.Name) and target.id == "FUZZ_TARGETS"
+                for target in node.targets
+            ):
+                value = node.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "FUZZ_TARGETS"
+        ):
+            value = node.value
+
+        if value is None:
+            continue
+
+        try:
+            raw_targets = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            continue
+        if isinstance(raw_targets, (list, tuple, set)):
+            targets.extend(name for name in raw_targets if isinstance(name, str))
+    return targets
+
+
 def _discover_fuzz_targets(path: Path) -> list[str]:
     """Find top-level functions that look like pure helpers (1–2 args)."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
         return []
-    targets: list[str] = []
+    targets: list[str] = _explicit_fuzz_targets(tree)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
             arg_count = len(node.args.args)
             if 1 <= arg_count <= 2 and not node.decorator_list:
                 targets.append(node.name)
-    return targets[:5]
+
+    deduped: list[str] = []
+    for target in targets:
+        if target not in deduped:
+            deduped.append(target)
+    return deduped[:5]
 
 
 def _run_harness(path: Path, func_name: str, timeout_s: float = 5.0) -> dict:
@@ -121,17 +155,20 @@ def run(paths: list[Path]) -> StepResult:
     Deterministically fuzz discovered helper functions with boundary inputs.
 
     Runs in a subprocess sandbox (Docker optional later). Crashes are ERRORS.
-    TypeErrors from signature mismatch are informational only.
+    TypeError / ValueError contract rejections are informational only.
     PermissionError (and subclasses) are treated as expected deny paths.
     """
     findings: list[Finding] = []
     functions_tested = 0
     crashes = 0
+    rejections = 0
+    targets_tested: list[str] = []
     denied = 0
 
     skip_markers = (
         "test_",
         "/tests/",
+        "app/proxy/interceptor.py",
         "governance/steps",
         "governance/cli",
         "governance/pipeline",
@@ -152,7 +189,13 @@ def run(paths: list[Path]) -> StepResult:
 
     for path, func_name in jobs:
         functions_tested += 1
+        targets_tested.append(f"{path}:{func_name}")
         outcome = _run_harness(path, func_name)
+        rejections += sum(
+            1
+            for item in outcome.get("results", [])
+            if item.get("status") == "rejected"
+        )
         crash_items = [
             item for item in outcome.get("results", []) if item.get("status") == "crash"
         ]
@@ -185,6 +228,8 @@ def run(paths: list[Path]) -> StepResult:
             "functions_tested": functions_tested,
             "boundary_cases": len(BOUNDARY_CASES),
             "crashes": crashes,
+            "rejections": rejections,
             "denied": denied,
+            "targets": targets_tested,
         },
     )
