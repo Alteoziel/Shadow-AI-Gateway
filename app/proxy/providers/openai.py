@@ -38,7 +38,8 @@ class OpenAIProvider(BaseLLMProvider):
                 json=payload,
             )
             response.raise_for_status()
-            return response.json()
+            data: dict[str, Any] = response.json()
+            return data
         except httpx.HTTPError as exc:
             raise map_httpx_error("openai", exc) from exc
 
