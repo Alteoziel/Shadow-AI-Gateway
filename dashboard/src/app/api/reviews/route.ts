@@ -4,16 +4,21 @@ import {
   unauthorizedResponse,
 } from "@/lib/auth";
 import {
+  getStoreStatus,
   listReviews,
   upsertReview,
   sanitizeReviewForClient,
   type StepResult,
 } from "@/lib/store";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const reviews = await listReviews();
   return NextResponse.json({
     reviews: reviews.map(sanitizeReviewForClient),
+    store: getStoreStatus(),
   });
 }
 

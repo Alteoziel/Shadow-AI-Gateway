@@ -117,6 +117,8 @@ Secret **names** are correct as repository secrets under Actions. Only the URL v
 
 If the list is empty: CI could not POST (wrong URL/secret), or Redis is missing. Check the Actions log for dashboard POST soft-fail messages, and the Vercel function logs for Redis errors.
 
+If the site returns **500 / Application error**: open `/api/health` on the same host. You should see JSON with `"ok": true`. Then check Deployment → Logs. Usual causes: Redis not linked to **Preview** (only Production), or an old deploy writing to a read-only path. Redeploy after connecting Upstash to both environments.
+
 ### Local alternative (no Vercel)
 
 ```bash
