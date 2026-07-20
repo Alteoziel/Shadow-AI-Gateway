@@ -1,0 +1,12 @@
+[
+  {
+    "id": "leetcode_two_sum_classic",
+    "description": "Classic LeetCode Two Sum brute-force teaching solution (protected signature)",
+    "content": "def twoSum(nums, target):\n    for i in range(len(nums)):\n        for j in range(i + 1, len(nums)):\n            if nums[i] + nums[j] == target:\n                return [i, j]\n    return []\n"
+  },
+  {
+    "id": "hardcoded_openai_key_pattern",
+    "description": "Example of a forbidden hardcoded OpenAI-looking key assignment pattern",
+    "content": "OPENAI_API_KEY = \"sk-proj-abcdefghijklmnopqrstuvwxyz0123456789\"\nclient = OpenAI(api_key=OPENAI_API_KEY)\n"
+  }
+]

@@ -1,0 +1,81 @@
+name: AI Code Guardrail
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  verify-code:
+    name: Governance Steps 1–6
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: governance
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install governance engine
+        run: pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest -q
+
+      - name: Run guardrail suite on PR diff
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOVERNANCE_LLM_API_KEY: ${{ secrets.GOVERNANCE_LLM_API_KEY }}
+          GOVERNANCE_LLM_MODEL: ${{ vars.GOVERNANCE_LLM_MODEL }}
+          GOVERNANCE_DASHBOARD_URL: ${{ secrets.GOVERNANCE_DASHBOARD_URL }}
+          GOVERNANCE_DASHBOARD_SECRET: ${{ secrets.GOVERNANCE_DASHBOARD_SECRET }}
+        run: |
+          set -euo pipefail
+          ARGS=(
+            run
+            --root ..
+            --json-out /tmp/guardrail-report.json
+            --markdown-out /tmp/guardrail-report.md
+            --post-dashboard
+          )
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ARGS+=(--changed-only --base-ref "origin/${{ github.base_ref }}")
+            ARGS+=(--pr-number "${{ github.event.pull_request.number }}")
+            ARGS+=(--commit-sha "${{ github.event.pull_request.head.sha }}")
+            ARGS+=(--repo "${{ github.repository }}")
+            ARGS+=(--comment-pr --inline-comments)
+          else
+            # workflow_dispatch: no PR context — scan full tree, skip PR flags
+            ARGS+=(--base-ref origin/main)
+            ARGS+=(--commit-sha "${{ github.sha }}")
+            ARGS+=(--repo "${{ github.repository }}")
+          fi
+
+          ai-guardrail "${ARGS[@]}"
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guardrail-report
+          path: |
+            /tmp/guardrail-report.json
+            /tmp/guardrail-report.md
