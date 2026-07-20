@@ -80,7 +80,13 @@ export default async function HomePage({ searchParams }: Props) {
             <p className="text-sm text-mist">
               No reviews yet. CI will POST here when{" "}
               <code>GOVERNANCE_DASHBOARD_URL</code> is set to this deployment
-              URL.
+              URL and <code>GOVERNANCE_DASHBOARD_SECRET</code> matches the
+              Vercel env var exactly. A 401 in the Actions log means the
+              secrets do not match — fix them, then re-run{" "}
+              <strong className="font-semibold text-white">
+                Governance Steps 1–6
+              </strong>
+              .
             </p>
           ) : (
             <ul className="space-y-2">
