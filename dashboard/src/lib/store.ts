@@ -1,12 +1,13 @@
 /**
  * Lightweight review store.
  *
- * - Preferred: Upstash Redis / Vercel KV (durable on serverless)
+ * - Preferred: Upstash Redis (Vercel Marketplace → Upstash)
  * - Fallback (local/dev): in-process memory
  *
  * Intentionally avoids filesystem persistence. Writing HTTP request bodies to
- * disk (and later reading them into outbound fetch calls) is the pattern
- * CodeQL flags as js/http-to-file-access and js/file-access-to-http.
+ * disk (and later reading them into outbound fetch calls) is exactly the
+ * pattern CodeQL flags as js/http-to-file-access and js/file-access-to-http.
+ * Redis/memory keep the same API without that taint path.
  */
 
 import { createHash } from "crypto";
