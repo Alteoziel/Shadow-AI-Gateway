@@ -361,17 +361,24 @@ Until step 2 is enabled, the governance workflow is advisory only.
 
 **Also enforce comprehension in practice:** even with CI green, use the dashboard’s Step 6 quiz before merge — Approve & Merge stays locked until you pass (≥80%).
 
-### C. Deploy the Step 7 dashboard
+### C. Deploy the Step 7 dashboard (Vercel)
 
-```bash
-cd dashboard
-npm install
-# Set GOVERNANCE_DASHBOARD_SECRET + GITHUB_TOKEN (merge rights)
-npm run build && npm start
-# or: deploy to Vercel and set the same env vars in the project
-```
+The quiz UI lives in `dashboard/`. Deploy it as a **new** Vercel project with
+**Root Directory = `dashboard`** (do not reuse unrelated sellable-saas projects).
 
-Create a fine-grained PAT / GitHub App token with `contents: write` + `pull-requests: write` on this repo for the **Approve & Merge** button (`GITHUB_TOKEN` / `GH_MERGE_TOKEN` on the dashboard host).
+On Vercel you **must** attach **Upstash Redis** (Marketplace → Storage) so quiz
+state survives across serverless invocations. Set:
+
+| Env | Where |
+|-----|-------|
+| `GOVERNANCE_DASHBOARD_SECRET` | Vercel + matching GitHub Actions secret |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Auto from Upstash Marketplace |
+| `GOVERNANCE_DASHBOARD_URL` | GitHub Actions secret → your `https://….vercel.app` |
+| `GITHUB_TOKEN` / `GH_MERGE_TOKEN` | Vercel only — fine-grained PAT with `contents: write` + `pull-requests: write` for Approve & Merge |
+
+Click-path checklist: [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) §4.
+
+Local dry-run: `cd dashboard && npm install && npm run dev`.
 
 ### D. Local dry-run before pushing
 

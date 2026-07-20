@@ -20,8 +20,13 @@ Open http://localhost:3000
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `GOVERNANCE_DASHBOARD_SECRET` | Recommended in prod | Shared secret for CI → `/api/reviews` POSTs |
-| `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | Required for merge | PAT with `contents:write` + `pull-requests:write` |
+| `GOVERNANCE_DASHBOARD_SECRET` | Yes in prod | Shared secret for CI → `/api/reviews` POSTs |
+| `UPSTASH_REDIS_REST_URL` | **Yes on Vercel** | Durable quiz/review store |
+| `UPSTASH_REDIS_REST_TOKEN` | **Yes on Vercel** | Durable quiz/review store |
+| `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | For merge | PAT with `contents:write` + `pull-requests:write` |
+
+Locally, reviews are stored in `.data/reviews.json`. On Vercel, use Upstash Redis
+(Marketplace → Storage) — the serverless filesystem cannot hold quizzes.
 
 ## API
 
@@ -29,7 +34,14 @@ Open http://localhost:3000
 - `POST /api/reviews` — ingest pipeline JSON (header `X-Governance-Secret`)
 - `POST /api/reviews/:id` — `{ "action": "submit_quiz" | "approve" | "reject" | "merge" }`
 
-## Deploy
+## Deploy on Vercel
 
-This dashboard is a normal Next.js app and **can** deploy on Vercel (unlike the
-streaming gateway proxy, which must stay on long-lived Docker hosts).
+1. Import this GitHub repo as a **new** Vercel project
+2. Set **Root Directory** to `dashboard`
+3. Add Upstash Redis from the Storage / Marketplace tab
+4. Set `GOVERNANCE_DASHBOARD_SECRET` (and optional GitHub merge token)
+5. Deploy, then set GitHub Actions secrets:
+   - `GOVERNANCE_DASHBOARD_URL` = your `https://….vercel.app`
+   - `GOVERNANCE_DASHBOARD_SECRET` = same secret as Vercel
+
+Full click-path: [`SETUP_GOVERNANCE.md`](../SETUP_GOVERNANCE.md) §4.

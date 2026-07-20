@@ -15,11 +15,18 @@ type Props = {
 
 export default async function HomePage({ searchParams }: Props) {
   const { id } = await searchParams;
-  const reviews = await listReviews();
-  const selectedRaw = id ? await getReview(id) : reviews[0] ?? null;
-  const selected = selectedRaw
-    ? sanitizeReviewForClient(selectedRaw)
-    : null;
+
+  let reviews: Review[] = [];
+  let selected: Review | null = null;
+  let storeError: string | null = null;
+
+  try {
+    reviews = await listReviews();
+    const selectedRaw = id ? await getReview(id) : reviews[0] ?? null;
+    selected = selectedRaw ? sanitizeReviewForClient(selectedRaw) : null;
+  } catch (err) {
+    storeError = err instanceof Error ? err.message : "Store unavailable";
+  }
 
   return (
     <main>
@@ -36,6 +43,22 @@ export default async function HomePage({ searchParams }: Props) {
           <code className="text-white/80">main</code>.
         </p>
       </header>
+
+      {storeError ? (
+        <div
+          className="mb-8 rounded-xl border border-warn/40 bg-warn/10 p-6 text-sm text-mist"
+          role="alert"
+        >
+          <p className="font-semibold text-warn">Dashboard store not ready</p>
+          <p className="mt-2">{storeError}</p>
+          <p className="mt-3">
+            See <code className="text-white/80">SETUP_GOVERNANCE.md</code> §4 —
+            add Upstash Redis from the Vercel Storage tab, set{" "}
+            <code className="text-white/80">GOVERNANCE_DASHBOARD_SECRET</code>,
+            then redeploy.
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
         <aside className="space-y-3">

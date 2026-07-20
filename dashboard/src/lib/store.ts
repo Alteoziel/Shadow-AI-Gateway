@@ -1,14 +1,17 @@
 /**
  * Lightweight review store.
  *
- * Default: JSON file under .data/ (local / single-instance).
- * Optional: set DATABASE_URL to a Postgres connection string later
- * (Phase 3 of the gateway plan uses Supabase — same target).
+ * - Local / single-instance: JSON file under `.data/`
+ * - Vercel / serverless: Upstash Redis (set via Vercel Marketplace → Upstash)
+ *
+ * Redis is required on Vercel — the serverless filesystem is ephemeral and
+ * not shared across invocations, so `.data/reviews.json` cannot hold quizzes.
  */
 
 import { createHash } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
+import { Redis } from "@upstash/redis";
 
 export type Severity = "info" | "warning" | "error" | "critical";
 
@@ -97,8 +100,33 @@ export type Review = {
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const STORE_PATH = path.join(DATA_DIR, "reviews.json");
+const REDIS_KEY = "governance:reviews";
 
-async function ensureStore(): Promise<Review[]> {
+function redisClient(): Redis | null {
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) return null;
+  return new Redis({ url, token });
+}
+
+function assertServerlessStoreReady(): void {
+  // On Vercel, file storage will silently lose quiz data across lambdas.
+  if (process.env.VERCEL && !redisClient()) {
+    throw new Error(
+      "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required on Vercel. " +
+        "Add Upstash Redis from the Vercel Marketplace (Storage tab), then redeploy."
+    );
+  }
+}
+
+async function readReviews(): Promise<Review[]> {
+  const redis = redisClient();
+  if (redis) {
+    const data = await redis.get<Review[]>(REDIS_KEY);
+    return Array.isArray(data) ? data : [];
+  }
+
+  assertServerlessStoreReady();
   await fs.mkdir(DATA_DIR, { recursive: true });
   try {
     const raw = await fs.readFile(STORE_PATH, "utf8");
@@ -109,7 +137,14 @@ async function ensureStore(): Promise<Review[]> {
   }
 }
 
-async function writeStore(reviews: Review[]): Promise<void> {
+async function writeReviews(reviews: Review[]): Promise<void> {
+  const redis = redisClient();
+  if (redis) {
+    await redis.set(REDIS_KEY, reviews);
+    return;
+  }
+
+  assertServerlessStoreReady();
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.writeFile(STORE_PATH, JSON.stringify(reviews, null, 2), "utf8");
 }
@@ -194,12 +229,12 @@ export function gradeComprehension(
 }
 
 export async function listReviews(): Promise<Review[]> {
-  const reviews = await ensureStore();
+  const reviews = await readReviews();
   return reviews.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function getReview(id: string): Promise<Review | null> {
-  const reviews = await ensureStore();
+  const reviews = await readReviews();
   return reviews.find((r) => r.id === id) ?? null;
 }
 
@@ -208,7 +243,7 @@ export async function upsertReview(
     status?: ReviewStatus;
   }
 ): Promise<Review> {
-  const reviews = await ensureStore();
+  const reviews = await readReviews();
   const now = new Date().toISOString();
   const comprehension = extractComprehension(payload.steps);
   const fingerprint = comprehensionFingerprint(comprehension);
@@ -265,7 +300,7 @@ export async function upsertReview(
       updatedAt: now,
     };
     reviews[existingIdx] = updated;
-    await writeStore(reviews);
+    await writeReviews(reviews);
     return updated;
   }
 
@@ -286,7 +321,7 @@ export async function upsertReview(
     comprehension_attempt: null,
   };
   reviews.unshift(review);
-  await writeStore(reviews);
+  await writeReviews(reviews);
   return review;
 }
 
@@ -294,7 +329,7 @@ export async function updateReview(
   id: string,
   patch: Partial<Review>
 ): Promise<Review | null> {
-  const reviews = await ensureStore();
+  const reviews = await readReviews();
   const idx = reviews.findIndex((r) => r.id === id);
   if (idx < 0) return null;
   reviews[idx] = {
@@ -302,6 +337,6 @@ export async function updateReview(
     ...patch,
     updatedAt: new Date().toISOString(),
   };
-  await writeStore(reviews);
+  await writeReviews(reviews);
   return reviews[idx];
 }
