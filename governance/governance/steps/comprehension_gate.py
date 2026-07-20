@@ -218,7 +218,13 @@ def _extract_python_symbols(path: Path) -> dict[str, Any]:
 
 def _extract_ts_symbols(path: Path) -> dict[str, Any]:
     """Lightweight TS/JS export/function scan (regex — no nested AST walks)."""
-    info: dict[str, Any] = {"imports": [], "functions": [], "async_functions": [], "classes": []}
+    info: dict[str, Any] = {
+        "imports": [],
+        "functions": [],
+        "async_functions": [],
+        "classes": [],
+        "exported": [],
+    }
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -234,23 +240,24 @@ def _extract_ts_symbols(path: Path) -> dict[str, Any]:
             info["imports"].append(top)
 
     for m in re.finditer(
-        r"(?:export\s+)?(?P<async>async\s+)?function\s+(?P<name>[A-Za-z_][\w]*)\s*\((?P<args>[^)]*)\)",
+        r"(?P<export>export\s+)?(?P<async>async\s+)?function\s+(?P<name>[A-Za-z_][\w]*)\s*\((?P<args>[^)]*)\)",
         text,
     ):
         args = [a.strip().split(":")[0].strip() for a in m.group("args").split(",") if a.strip()]
         args = [a for a in args if a and a != "this"]
-        entry = {"name": m.group("name"), "args": args, "lineno": text[: m.start()].count("\n") + 1, "doc": ""}
+        entry = {
+            "name": m.group("name"),
+            "args": args,
+            "lineno": text[: m.start()].count("\n") + 1,
+            "doc": "",
+            "exported": bool(m.group("export")),
+        }
         if m.group("async"):
             info["async_functions"].append(entry)
         else:
             info["functions"].append(entry)
-
-    for m in re.finditer(
-        r"export\s+(?:async\s+)?function\s+(?P<name>[A-Za-z_][\w]*)",
-        text,
-    ):
-        # already captured above when `function` form matches
-        _ = m
+        if m.group("export"):
+            info["exported"].append(m.group("name"))
 
     for m in re.finditer(
         r"export\s+(?:const|let|var)\s+(?P<name>[A-Za-z_][\w]*)\s*=\s*(?P<async>async\s*)?\(",
@@ -261,13 +268,16 @@ def _extract_ts_symbols(path: Path) -> dict[str, Any]:
             "args": [],
             "lineno": text[: m.start()].count("\n") + 1,
             "doc": "",
+            "exported": True,
         }
         if m.group("async"):
             info["async_functions"].append(entry)
         else:
             info["functions"].append(entry)
+        info["exported"].append(m.group("name"))
 
     info["imports"] = sorted(set(info["imports"]))
+    info["exported"] = sorted(set(info["exported"]))
     return info
 
 
@@ -499,6 +509,17 @@ def _build_deterministic_pack(
         all_imports.update(meta["imports"])
         for fn in meta["functions"] + meta["async_functions"]:
             all_fns.append((rel, fn))
+
+    # Prefer exported / documented callables when building quiz focus
+    def _fn_rank(item: tuple[str, dict]) -> tuple[int, int, str]:
+        rel, fn = item
+        exported = 0 if fn.get("exported") or fn["name"] in set(
+            symbols.get(rel, {}).get("exported") or []
+        ) else 1
+        has_doc = 0 if (fn.get("doc") or "").strip() else 1
+        return (exported, has_doc, fn["name"])
+
+    all_fns.sort(key=_fn_rank)
 
     changed_names = [_rel(p, root) for p in file_paths][:30]
     areas = _areas_for_files(changed_names)
