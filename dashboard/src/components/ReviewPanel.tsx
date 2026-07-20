@@ -156,7 +156,33 @@ type PublicQuestion = {
   category_label?: string;
   prompt: string;
   choices: string[];
+  format?: "text" | "code";
 };
+
+function renderQuizPrompt(prompt: string) {
+  const parts = prompt.split(/(```[\s\S]*?```)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("```")) {
+      const body = part.replace(/^```(?:\w+)?\n?/, "").replace(/```$/, "");
+      return (
+        <pre
+          key={i}
+          className="mt-2 overflow-x-auto rounded-md bg-black/50 p-3 text-xs leading-relaxed text-signal"
+        >
+          <code>{body}</code>
+        </pre>
+      );
+    }
+    return (
+      <span
+        key={i}
+        dangerouslySetInnerHTML={{
+          __html: part.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
+        }}
+      />
+    );
+  });
+}
 
 function ReviewerUnlock() {
   const [hasSecret, setHasSecret] = useState(false);
@@ -360,16 +386,10 @@ function ComprehensionPanel({ review }: { review: Review }) {
               <span className="text-mist">
                 {i + 1}. [{q.category_label || q.category}]
               </span>{" "}
-              <span
-                dangerouslySetInnerHTML={{
-                  __html: q.prompt.replace(
-                    /\*\*(.*?)\*\*/g,
-                    "<strong>$1</strong>"
-                  ),
-                }}
-              />
-            </legend>
-            <div className="space-y-1">
+              <span className="mt-1 block whitespace-pre-wrap">
+                {renderQuizPrompt(q.prompt)}
+              </span>
+            </legend>            <div className="space-y-1">
               {q.choices.map((choice, idx) => (
                 <label
                   key={idx}

@@ -91,6 +91,7 @@ CATEGORY_LABELS = {
     "manual_tasks": "Manual things you must do",
     "functions": "Functions & call flow",
     "security": "Security implications",
+    "coding_problem": "Coding problem (from this PR)",
 }
 
 
@@ -308,7 +309,9 @@ def _build_deterministic_pack(
         "diff_chars": len(diff_text or ""),
     }
 
-    questions = _make_questions(study_guide, all_fns, all_imports)
+    questions = _make_questions(
+        study_guide, all_fns, all_imports, paths=paths, root=root
+    )
     return {
         "learner_level": "absolute_beginner",
         "pass_threshold": PASS_THRESHOLD,
@@ -325,6 +328,8 @@ def _q(
     choices: list[str],
     answer_index: int,
     explanation: str,
+    *,
+    format: str = "text",
 ) -> dict[str, Any]:
     return {
         "id": qid,
@@ -334,13 +339,257 @@ def _q(
         "choices": choices,
         "answer_index": answer_index,
         "explanation": explanation,
+        "format": format,
     }
+
+
+def _truncate_code(text: str, limit: int = 700) -> str:
+    text = text.strip("\n")
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n# ..."
+
+
+def _extract_python_snippets(
+    paths: list[Path], *, root: Path | None, limit: int = 8
+) -> list[dict[str, Any]]:
+    """Pull real callables from the PR so coding questions are about this diff."""
+    snippets: list[dict[str, Any]] = []
+    for path in paths:
+        if not path.is_file() or path.suffix != ".py":
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (OSError, SyntaxError):
+            continue
+        rel = _rel(path, root)
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            seg = ast.get_source_segment(source, node) or ""
+            if len(seg.strip()) < 20:
+                continue
+            returns: list[str] = []
+            for child in ast.walk(node):
+                if isinstance(child, ast.Return) and child.value is not None:
+                    piece = ast.get_source_segment(source, child.value)
+                    if piece:
+                        returns.append(piece.strip())
+            args = [a.arg for a in node.args.args if a.arg != "self"]
+            snippets.append(
+                {
+                    "file": rel,
+                    "name": node.name,
+                    "async": isinstance(node, ast.AsyncFunctionDef),
+                    "args": args,
+                    "source": _truncate_code(seg),
+                    "returns": returns[:4],
+                    "doc": ast.get_docstring(node) or "",
+                }
+            )
+            if len(snippets) >= limit:
+                return snippets
+    return snippets
+
+
+def _make_coding_questions(
+    paths: list[Path],
+    *,
+    root: Path | None,
+    all_fns: list[tuple[str, dict]],
+) -> list[dict[str, Any]]:
+    """Always emit two coding problems tied to this PR's code when possible."""
+    snippets = _extract_python_snippets(paths, root=root)
+    # Prefer non-dunder, non-tiny test-looking names first
+    snippets_sorted = sorted(
+        snippets,
+        key=lambda s: (
+            s["name"].startswith("test_"),
+            s["name"].startswith("_"),
+            len(s["source"]),
+        ),
+    )
+
+    questions: list[dict[str, Any]] = []
+
+    # --- Q11: read real code from the PR and reason about behavior ---
+    if snippets_sorted:
+        snip = snippets_sorted[0]
+        code_block = f"```python\n{snip['source']}\n```"
+        if snip["returns"]:
+            correct = (
+                f"It returns `{snip['returns'][0]}` "
+                f"(see the `return` in `{snip['name']}`)."
+            )
+            wrongs = [
+                "It never returns — Python functions cannot return values.",
+                f"It always raises `NotImplementedError` before returning.",
+                f"It returns the string literal `\"{snip['name']}\"` and nothing else.",
+            ]
+            explanation = (
+                f"`{snip['name']}` in `{snip['file']}` returns `{snip['returns'][0]}`. "
+                "Open that file in the PR and trace the return path."
+            )
+        elif snip["doc"]:
+            correct = (
+                f"It implements: {snip['doc'][:120]} "
+                f"(documented on `{snip['name']}`)."
+            )
+            wrongs = [
+                "It is only a CSS animation helper with no Python logic.",
+                "It deletes the git repository when called.",
+                "It is an unused import alias and cannot be invoked.",
+            ]
+            explanation = (
+                f"Read the docstring/body of `{snip['name']}` in `{snip['file']}` "
+                "from this PR — that is what you must be able to explain."
+            )
+        else:
+            arg_list = ", ".join(snip["args"]) or "no arguments"
+            correct = (
+                f"It is a{'n async' if snip['async'] else ''} function "
+                f"`{snip['name']}({arg_list})` defined in this PR — you must be "
+                "able to walk through its body."
+            )
+            wrongs = [
+                "It is a Markdown heading, not executable code.",
+                "It is generated at runtime by Terraform only.",
+                "It lives only in the GitHub Actions cache, not in the repo.",
+            ]
+            explanation = (
+                f"Open `{snip['file']}` and explain `{snip['name']}` line by line."
+            )
+
+        choices = [correct, *wrongs]
+        # Keep correct at a stable but non-zero index so it's not always first
+        answer_index = 1
+        ordered = [choices[1], choices[0], choices[2], choices[3]]
+        questions.append(
+            _q(
+                "code_q11_trace_pr_fn",
+                "coding_problem",
+                (
+                    f"**Coding problem 1 — from this PR (`{snip['file']}`).**\n\n"
+                    f"Read this function and choose the statement that matches the code:\n\n"
+                    f"{code_block}"
+                ),
+                ordered,
+                answer_index,
+                explanation,
+                format="code",
+            )
+        )
+    else:
+        # Fallback still framed as a coding exercise (gateway-shaped)
+        questions.append(
+            _q(
+                "code_q11_fallback_interceptor",
+                "coding_problem",
+                (
+                    "**Coding problem 1.** Given this scaffold from the gateway pattern:\n\n"
+                    "```python\n"
+                    "async def intercept_outbound_request(body: dict) -> dict:\n"
+                    "    # TODO: Human Hands-On Implementation\n"
+                    "    raise NotImplementedError\n"
+                    "```\n\n"
+                    "What must a correct implementation do before any provider call?"
+                ),
+                [
+                    "Call OpenAI first, then validate the response body only.",
+                    "Validate/normalize the outbound request pre-flight, then allow the provider adapter to run.",
+                    "Write the API key into the repo so adapters can import it.",
+                    "Skip validation when `body` contains the key `\"stream\": true`.",
+                ],
+                1,
+                "Checkpoint #1 is pre-flight validation in the interceptor — before upstream I/O.",
+                format="code",
+            )
+        )
+
+    # --- Q12: predict output / pick the correct fix for PR code ---
+    if len(snippets_sorted) >= 2:
+        snip = snippets_sorted[1]
+    elif snippets_sorted:
+        snip = snippets_sorted[0]
+    else:
+        snip = None
+
+    if snip is not None:
+        code_block = f"```python\n{snip['source']}\n```"
+        # Build a "which edit is correct" style problem
+        correct = (
+            f"Keep `{snip['name']}`'s control flow as in the PR and be able to "
+            f"explain each branch/return in `{snip['file']}`."
+        )
+        distractors = [
+            f"Delete `{snip['name']}` entirely; CI does not need real functions.",
+            f"Replace `{snip['name']}` with `eval(user_input)` for flexibility.",
+            f"Copy `{snip['name']}` into the README as a screenshot only — no code review needed.",
+        ]
+        ordered = [distractors[0], distractors[1], correct, distractors[2]]
+        questions.append(
+            _q(
+                "code_q12_fix_or_explain",
+                "coding_problem",
+                (
+                    f"**Coding problem 2 — debug/own this PR code (`{snip['file']}`).**\n\n"
+                    f"You are reviewing `{snip['name']}`. Which action is the correct "
+                    f"engineering response before merge?\n\n{code_block}"
+                ),
+                ordered,
+                2,
+                (
+                    f"You must understand and stand behind `{snip['name']}` in "
+                    f"`{snip['file']}`. Deleting it, using eval, or skipping review "
+                    "are not acceptable merge paths."
+                ),
+                format="code",
+            )
+        )
+    else:
+        fn_hint = all_fns[0][1]["name"] if all_fns else "handle_request"
+        questions.append(
+            _q(
+                "code_q12_fallback_trace",
+                "coding_problem",
+                (
+                    "**Coding problem 2.** Trace this Python:\n\n"
+                    "```python\n"
+                    "def normalize(body: dict) -> dict:\n"
+                    "    messages = body.get(\"messages\") or []\n"
+                    "    if not isinstance(messages, list):\n"
+                    "        raise ValueError(\"messages must be a list\")\n"
+                    "    return {**body, \"messages\": messages}\n"
+                    "\n"
+                    "normalize({\"messages\": \"oops\"})\n"
+                    "```\n\n"
+                    "What happens?"
+                ),
+                [
+                    "Returns `{\"messages\": \"oops\"}` unchanged.",
+                    "Raises `ValueError` because `messages` is not a list.",
+                    "Calls OpenAI and returns a streaming response.",
+                    "Writes a row to Postgres and returns `None`.",
+                ],
+                1,
+                "The guard checks `isinstance(messages, list)` before continuing — "
+                f"same discipline you need when reading `{fn_hint}` in this PR.",
+                format="code",
+            )
+        )
+
+    assert len(questions) == 2
+    return questions
 
 
 def _make_questions(
     guide: dict[str, Any],
     all_fns: list[tuple[str, dict]],
     imports: set[str],
+    *,
+    paths: list[Path] | None = None,
+    root: Path | None = None,
 ) -> list[dict[str, Any]]:
     questions: list[dict[str, Any]] = []
 
@@ -545,6 +794,11 @@ def _make_questions(
             1,
             "This quiz exists so 'human review' means informed review, not a blind click.",
         )
+    )
+
+    # Q11–Q12: coding problems grounded in this PR's code
+    questions.extend(
+        _make_coding_questions(paths or [], root=root, all_fns=all_fns)
     )
 
     return questions
