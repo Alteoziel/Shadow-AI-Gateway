@@ -4,11 +4,19 @@ import {
   unauthorizedResponse,
 } from "@/lib/auth";
 import {
+  buildPullMergeUrl,
+  dashboardReviewUrl,
+  setGovernanceQuizStatus,
+} from "@/lib/github";
+import {
   getReview,
   updateReview,
   gradeComprehension,
   sanitizeReviewForClient,
 } from "@/lib/store";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -61,7 +69,15 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
     const answers = (body.answers ?? {}) as Record<string, number>;
-    const attempt = gradeComprehension(review.comprehension, answers);
+    const codingSubmissions = (body.coding_submissions ?? {}) as Record<
+      string,
+      string
+    >;
+    const attempt = gradeComprehension(
+      review.comprehension,
+      answers,
+      codingSubmissions
+    );
     const updated = await updateReview(id, {
       comprehension_passed: attempt.passed,
       comprehension_attempt: attempt,
@@ -69,17 +85,39 @@ export async function POST(req: NextRequest, { params }: Params) {
       reviewer_note: note,
     });
 
+    const quizStatus = await setGovernanceQuizStatus({
+      repo: review.repo,
+      commitSha: review.commit_sha,
+      state: attempt.passed ? "success" : "failure",
+      description: attempt.passed
+        ? `Quiz passed (${attempt.correct}/${attempt.total}).`
+        : `Quiz failed (${attempt.correct}/${attempt.total}) — retake required.`,
+      targetUrl: dashboardReviewUrl(id),
+    });
+
     // Teach with explanations, but never leak expected_index (anti-cheat)
-    const explanations = review.comprehension.questions.map((q) => ({
-      id: q.id,
-      correct: answers[q.id] === q.answer_index,
-      explanation: q.explanation,
-    }));
+    const explanations = review.comprehension.questions.map((q) => {
+      if (q.question_type === "coding") {
+        const c = attempt.coding?.[q.id];
+        return {
+          id: q.id,
+          correct: Boolean(c?.passed),
+          explanation: q.explanation,
+          coding: c ?? null,
+        };
+      }
+      return {
+        id: q.id,
+        correct: answers[q.id] === q.answer_index,
+        explanation: q.explanation,
+      };
+    });
 
     return NextResponse.json({
       review: updated ? sanitizeReviewForClient(updated) : null,
       attempt,
       explanations,
+      quiz_status: quizStatus,
     });
   }
 
@@ -155,18 +193,18 @@ export async function POST(req: NextRequest, { params }: Params) {
         { status: 400 }
       );
     }
-    if (!review.repo || !review.pr_number) {
+    const mergeTarget = buildPullMergeUrl(review.repo, review.pr_number);
+    if ("error" in mergeTarget) {
       return NextResponse.json(
         {
           error: "missing_pr_metadata",
-          message: "Review has no repo/PR number.",
+          message: mergeTarget.error,
         },
         { status: 400 }
       );
     }
 
-    const mergeUrl = `https://api.github.com/repos/${review.repo}/pulls/${review.pr_number}/merge`;
-    const mergeResp = await fetch(mergeUrl, {
+    const mergeResp = await fetch(mergeTarget.url, {
       method: "PUT",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -174,7 +212,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        commit_title: `Merge PR #${review.pr_number} via AI Governance Panel`,
+        commit_title: `Merge PR #${mergeTarget.pr} via AI Governance Panel`,
         merge_method: "squash",
       }),
     });

@@ -1,10 +1,9 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.main import app
 from app.proxy.correlation import CORRELATION_ID_HEADER
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
