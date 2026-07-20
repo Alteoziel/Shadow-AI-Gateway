@@ -1,16 +1,16 @@
 /**
  * Lightweight review store.
  *
- * - Local / single-instance: JSON file under `.data/`
- * - Vercel / serverless: Upstash Redis (set via Vercel Marketplace → Upstash)
+ * - Preferred: Upstash Redis (Vercel Marketplace → Upstash)
+ * - Fallback (local/dev): in-process memory
  *
- * Redis is required on Vercel — the serverless filesystem is ephemeral and
- * not shared across invocations, so `.data/reviews.json` cannot hold quizzes.
+ * Intentionally avoids filesystem persistence. Writing HTTP request bodies to
+ * disk (and later reading them into outbound fetch calls) is exactly the
+ * pattern CodeQL flags as js/http-to-file-access and js/file-access-to-http.
+ * Redis/memory keep the same API without that taint path.
  */
 
 import { createHash } from "crypto";
-import { promises as fs } from "fs";
-import path from "path";
 import { Redis } from "@upstash/redis";
 
 export type Severity = "info" | "warning" | "error" | "critical";
@@ -98,9 +98,10 @@ export type Review = {
   comprehension_fingerprint?: string | null;
 };
 
-const DATA_DIR = path.join(process.cwd(), ".data");
-const STORE_PATH = path.join(DATA_DIR, "reviews.json");
 const REDIS_KEY = "governance:reviews";
+
+/** Process-local fallback when Redis is not configured (dev / single instance). */
+let memoryReviews: Review[] = [];
 
 function redisClient(): Redis | null {
   const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
@@ -110,7 +111,7 @@ function redisClient(): Redis | null {
 }
 
 function assertServerlessStoreReady(): void {
-  // On Vercel, file storage will silently lose quiz data across lambdas.
+  // On Vercel, memory is not shared across lambdas — Redis is required.
   if (process.env.VERCEL && !redisClient()) {
     throw new Error(
       "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required on Vercel. " +
@@ -127,14 +128,7 @@ async function readReviews(): Promise<Review[]> {
   }
 
   assertServerlessStoreReady();
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
-    return JSON.parse(raw) as Review[];
-  } catch {
-    await fs.writeFile(STORE_PATH, "[]", "utf8");
-    return [];
-  }
+  return memoryReviews;
 }
 
 async function writeReviews(reviews: Review[]): Promise<void> {
@@ -145,8 +139,7 @@ async function writeReviews(reviews: Review[]): Promise<void> {
   }
 
   assertServerlessStoreReady();
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(STORE_PATH, JSON.stringify(reviews, null, 2), "utf8");
+  memoryReviews = reviews;
 }
 
 export function extractComprehension(
