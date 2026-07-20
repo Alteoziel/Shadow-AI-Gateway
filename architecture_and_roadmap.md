@@ -1,12 +1,15 @@
 # Shadow AI Guardrail Gateway — Architecture & Roadmap
 
-> **THE LEDGER** — Single source of truth for all agents, humans, and reviewers.
-> Read this file before any developmental cycle. Keep it current when phase status changes.
+> **THE LEDGER IS LAW** — Single source of truth for all agents, humans, and reviewers.
+> If repository instructions conflict, this Ledger wins. Read it before any developmental cycle.
+> Developmental work must follow QRSPI: `.cursor/qrspi/` playbooks, with artifacts under `thoughts/qrspi/`.
+> QRSPI autonomy does not authorize agents to complete Human-in-the-Loop product checkpoints.
 
 **Last updated:** 2026-07-20  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
-**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (comprehension gate added)
+**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (comprehension gate added)  
+**Task workflow:** QRSPI mandatory for developmental tasks; docs-only/process tasks still record artifacts when run through QRSPI.
 
 ---
 

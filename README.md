@@ -2,7 +2,13 @@
 
 Enterprise security proxy that sits between corporate users and public LLMs (OpenAI / Anthropic) to intercept outbound traffic **pre-flight**.
 
-> **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger** — single source of truth for phases, checkpoints, and guardrails.
+Read [`architecture_and_roadmap.md`](architecture_and_roadmap.md) first. The Ledger is the source of truth and wins if instructions conflict.
+
+For developmental work, follow QRSPI:
+
+- Playbooks: [`.cursor/qrspi/`](.cursor/qrspi/)
+- Artifacts: [`thoughts/qrspi/`](thoughts/qrspi/)
+- Current law: [`architecture_and_roadmap.md`](architecture_and_roadmap.md)
 
 ## Pre-merge gate (AI Governance Engine)
 
