@@ -1,23 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listReviews, upsertReview, type StepResult } from "@/lib/store";
-
-function authorize(req: NextRequest): boolean {
-  const expected = process.env.GOVERNANCE_DASHBOARD_SECRET;
-  if (!expected) {
-    // Local/dev convenience: allow when secret unset
-    return true;
-  }
-  return req.headers.get("x-governance-secret") === expected;
-}
+import {
+  authorizeIngest,
+  unauthorizedResponse,
+} from "@/lib/auth";
+import {
+  listReviews,
+  upsertReview,
+  sanitizeReviewForClient,
+  type StepResult,
+} from "@/lib/store";
 
 export async function GET() {
   const reviews = await listReviews();
-  return NextResponse.json({ reviews });
+  return NextResponse.json({
+    reviews: reviews.map(sanitizeReviewForClient),
+  });
 }
 
 export async function POST(req: NextRequest) {
-  if (!authorize(req)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!authorizeIngest(req)) {
+    return unauthorizedResponse("ingest");
   }
 
   const body = await req.json();
@@ -28,16 +30,10 @@ export async function POST(req: NextRequest) {
     repo: body.repo ?? null,
     steps: (body.steps ?? []) as StepResult[],
     summary: body.summary ?? {},
-    // status inferred: pending_comprehension when Step 6 pack present
   });
 
   return NextResponse.json(
-    {
-      review: {
-        ...review,
-        // Don't echo answer keys back to CI logs unnecessarily in clients
-      },
-    },
+    { review: sanitizeReviewForClient(review) },
     { status: 201 }
   );
 }

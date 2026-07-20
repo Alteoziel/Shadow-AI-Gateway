@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
 from fastapi.responses import StreamingResponse
@@ -8,8 +8,14 @@ async def relay_sse_stream(
     upstream: httpx.Response,
     *,
     media_type: str = "text/event-stream",
+    on_complete: Callable[[], Awaitable[None]] | None = None,
 ) -> StreamingResponse:
-    """Relay an upstream SSE/chunked body to the client without buffering."""
+    """Relay an upstream SSE/chunked body to the client without buffering.
+
+    Optional `on_complete` runs after the upstream body is fully consumed
+    (or aborted) — use it to close provider HTTP clients without cutting
+    the stream short.
+    """
 
     async def _iter_chunks() -> AsyncIterator[bytes]:
         try:
@@ -17,6 +23,8 @@ async def relay_sse_stream(
                 yield chunk
         finally:
             await upstream.aclose()
+            if on_complete is not None:
+                await on_complete()
 
     return StreamingResponse(
         _iter_chunks(),

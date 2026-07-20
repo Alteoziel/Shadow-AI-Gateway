@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  authorizeReviewer,
+  unauthorizedResponse,
+} from "@/lib/auth";
+import {
   getReview,
   updateReview,
   gradeComprehension,
-  publicComprehension,
+  sanitizeReviewForClient,
 } from "@/lib/store";
 
 type Params = { params: Promise<{ id: string }> };
@@ -15,20 +19,22 @@ export async function GET(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
   return NextResponse.json({
-    review: {
-      ...review,
-      // Never send answer keys to the client
-      comprehension: publicComprehension(review.comprehension),
-    },
+    review: sanitizeReviewForClient(review),
   });
 }
 
 /**
  * Actions:
  * - submit_quiz — grade Step 6 comprehension (required before approve/merge)
- * - approve / reject / merge — Step 7 human panel (merge blocked until quiz passed)
+ * - approve / reject / merge — Step 7 human panel
+ *
+ * All mutations require reviewer auth (X-Governance-Reviewer-Secret).
  */
 export async function POST(req: NextRequest, { params }: Params) {
+  if (!authorizeReviewer(req)) {
+    return unauthorizedResponse("reviewer");
+  }
+
   const { id } = await params;
   const review = await getReview(id);
   if (!review) {
@@ -48,7 +54,8 @@ export async function POST(req: NextRequest, { params }: Params) {
       return NextResponse.json(
         {
           error: "no_quiz",
-          message: "No comprehension pack on this review yet. Re-run the guardrail suite.",
+          message:
+            "No comprehension pack on this review yet. Re-run the guardrail suite.",
         },
         { status: 400 }
       );
@@ -62,19 +69,15 @@ export async function POST(req: NextRequest, { params }: Params) {
       reviewer_note: note,
     });
 
-    // Return explanations only after submit
+    // Teach with explanations, but never leak expected_index (anti-cheat)
     const explanations = review.comprehension.questions.map((q) => ({
       id: q.id,
       correct: answers[q.id] === q.answer_index,
       explanation: q.explanation,
-      expected_index: q.answer_index,
     }));
 
     return NextResponse.json({
-      review: {
-        ...updated,
-        comprehension: publicComprehension(updated?.comprehension),
-      },
+      review: updated ? sanitizeReviewForClient(updated) : null,
       attempt,
       explanations,
     });
@@ -85,11 +88,25 @@ export async function POST(req: NextRequest, { params }: Params) {
       status: "rejected",
       reviewer_note: note,
     });
-    return NextResponse.json({ review: updated });
+    return NextResponse.json({
+      review: updated ? sanitizeReviewForClient(updated) : null,
+    });
   }
 
   if (action === "approve" || action === "merge") {
-    if (review.comprehension && !review.comprehension_passed) {
+    // Always require a quiz pack + pass — missing pack is not a free bypass
+    if (!review.comprehension) {
+      return NextResponse.json(
+        {
+          error: "comprehension_required",
+          message:
+            "No comprehension quiz on this review. Re-run the AI Guardrail suite " +
+            "so Step 6 can generate a study guide + quiz before approving or merging.",
+        },
+        { status: 403 }
+      );
+    }
+    if (!review.comprehension_passed) {
       return NextResponse.json(
         {
           error: "comprehension_required",
@@ -108,10 +125,25 @@ export async function POST(req: NextRequest, { params }: Params) {
       status: "approved",
       reviewer_note: note,
     });
-    return NextResponse.json({ review: updated });
+    return NextResponse.json({
+      review: updated ? sanitizeReviewForClient(updated) : null,
+    });
   }
 
   if (action === "merge") {
+    // Do not squash-merge when automated suite failed
+    if (!review.passed) {
+      return NextResponse.json(
+        {
+          error: "suite_failed",
+          message:
+            "Automated guardrail suite failed. Fix blocking findings (or reject " +
+            "the PR) before merging. Comprehension alone is not enough.",
+        },
+        { status: 403 }
+      );
+    }
+
     const token = process.env.GITHUB_TOKEN || process.env.GH_MERGE_TOKEN;
     if (!token) {
       return NextResponse.json(
@@ -125,7 +157,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     }
     if (!review.repo || !review.pr_number) {
       return NextResponse.json(
-        { error: "missing_pr_metadata", message: "Review has no repo/PR number." },
+        {
+          error: "missing_pr_metadata",
+          message: "Review has no repo/PR number.",
+        },
         { status: 400 }
       );
     }
@@ -157,7 +192,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       merge_sha: mergeJson.sha ?? null,
       reviewer_note: note,
     });
-    return NextResponse.json({ review: updated, merge: mergeJson });
+    return NextResponse.json({
+      review: updated ? sanitizeReviewForClient(updated) : null,
+      merge: mergeJson,
+    });
   }
 
   return NextResponse.json({ error: "unknown_action" }, { status: 400 });

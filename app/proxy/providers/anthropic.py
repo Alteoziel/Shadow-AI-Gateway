@@ -38,12 +38,15 @@ class AnthropicProvider(BaseLLMProvider):
                 else:
                     system_parts.append(str(content))
                 continue
-            messages.append(
-                {
-                    "role": "user" if role == "user" else "assistant",
-                    "content": content,
-                }
-            )
+            if role == "user":
+                messages.append({"role": "user", "content": content})
+                continue
+            if role == "assistant":
+                messages.append({"role": "assistant", "content": content})
+                continue
+            # tool / function / unknown roles are not 1:1 on Anthropic Messages
+            # without tool_use blocks — skip rather than mislabel as assistant
+            continue
 
         anthropic_payload: dict[str, Any] = {
             "model": payload["model"],

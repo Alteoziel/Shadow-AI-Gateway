@@ -41,12 +41,20 @@ def _build_upstream_payload(
     request: ChatCompletionRequest,
     normalized: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge normalized interceptor output with gateway request fields."""
-    payload: dict[str, Any] = {
-        "model": normalized.get("model", request.model),
-        "messages": normalized.get("messages", [m.model_dump() for m in request.messages]),
-        "stream": request.stream,
-    }
+    """Merge normalized interceptor output with gateway request fields.
+
+    Interceptor-normalized `model` / `messages` / `stream` always win.
+    `extra_body` may only supply additive keys that do not override those.
+    """
+    protected = {"model", "messages", "stream"}
+    payload: dict[str, Any] = {}
+
+    # Additive extras first (cannot win over protected fields later)
+    if request.extra_body:
+        for key, value in request.extra_body.items():
+            if key not in protected:
+                payload[key] = value
+
     if request.temperature is not None:
         payload["temperature"] = request.temperature
     if request.max_tokens is not None:
@@ -55,11 +63,18 @@ def _build_upstream_payload(
         payload["top_p"] = request.top_p
     if request.stop is not None:
         payload["stop"] = request.stop
-    if request.extra_body:
-        payload.update(request.extra_body)
+
+    # Non-protected normalized metadata
     for key, value in normalized.items():
-        if key not in payload:
+        if key not in protected:
             payload[key] = value
+
+    # Protected fields last — interceptor + request contract enforce these
+    payload["model"] = normalized.get("model", request.model)
+    payload["messages"] = normalized.get(
+        "messages", [m.model_dump() for m in request.messages]
+    )
+    payload["stream"] = request.stream
     return payload
 
 
@@ -85,11 +100,13 @@ async def chat_completions(
     provider = _get_provider_adapter(provider_name)
     payload = _build_upstream_payload(request_body, normalized)
 
-    try:
-        if request_body.stream:
-            upstream = await provider.chat_completion_stream(payload)
-            return await relay_sse_stream(upstream)
+    if request_body.stream:
+        # Do NOT aclose the provider in a finally here — that would close the
+        # shared httpx client before FastAPI finishes streaming the body.
+        upstream = await provider.chat_completion_stream(payload)
+        return await relay_sse_stream(upstream, on_complete=provider.aclose)
 
+    try:
         result = await provider.chat_completion(payload)
         return JSONResponse(content=result)
     finally:

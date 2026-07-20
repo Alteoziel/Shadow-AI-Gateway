@@ -6,6 +6,7 @@
  * (Phase 3 of the gateway plan uses Supabase — same target).
  */
 
+import { createHash } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -91,6 +92,7 @@ export type Review = {
   comprehension?: ComprehensionPack | null;
   comprehension_passed?: boolean;
   comprehension_attempt?: ComprehensionAttempt | null;
+  comprehension_fingerprint?: string | null;
 };
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -121,7 +123,17 @@ export function extractComprehension(
   return pack as ComprehensionPack;
 }
 
-/** Public quiz payload — answers stripped so the browser cannot peek. */
+export function comprehensionFingerprint(
+  pack: ComprehensionPack | null | undefined
+): string | null {
+  if (!pack?.questions?.length) return null;
+  const material = pack.questions
+    .map((q) => `${q.id}:${q.prompt}:${q.choices.join("|")}`)
+    .join("\n");
+  return createHash("sha256").update(material).digest("hex").slice(0, 16);
+}
+
+/** Strip answer keys from a comprehension pack. */
 export function publicComprehension(pack: ComprehensionPack | null | undefined) {
   if (!pack) return null;
   return {
@@ -129,7 +141,34 @@ export function publicComprehension(pack: ComprehensionPack | null | undefined) 
     pass_threshold: pack.pass_threshold,
     generator: pack.generator,
     study_guide: pack.study_guide,
-    questions: pack.questions.map(({ answer_index: _a, explanation: _e, ...rest }) => rest),
+    questions: pack.questions.map(
+      ({ answer_index: _a, explanation: _e, ...rest }) => rest
+    ),
+  };
+}
+
+/** Strip answer keys from steps[].metrics.comprehension too. */
+export function sanitizeStepsForClient(steps: StepResult[]): StepResult[] {
+  return steps.map((step) => {
+    if (step.step !== "comprehension_gate" || !step.metrics?.comprehension) {
+      return step;
+    }
+    const metrics = { ...step.metrics };
+    metrics.comprehension = publicComprehension(
+      step.metrics.comprehension as ComprehensionPack
+    );
+    return { ...step, metrics };
+  });
+}
+
+/** Full client-safe review (no answer keys anywhere). */
+export function sanitizeReviewForClient(review: Review): Review {
+  return {
+    ...review,
+    comprehension: publicComprehension(
+      review.comprehension
+    ) as Review["comprehension"],
+    steps: sanitizeStepsForClient(review.steps),
   };
 }
 
@@ -172,9 +211,11 @@ export async function upsertReview(
   const reviews = await ensureStore();
   const now = new Date().toISOString();
   const comprehension = extractComprehension(payload.steps);
+  const fingerprint = comprehensionFingerprint(comprehension);
+  // Always require comprehension when a pack exists; if missing, stay pending_comprehension
   const initialStatus: ReviewStatus =
     payload.status ??
-    (comprehension ? "pending_comprehension" : "pending_review");
+    (comprehension ? "pending_comprehension" : "pending_comprehension");
 
   const existingIdx = reviews.findIndex(
     (r) =>
@@ -191,24 +232,27 @@ export async function upsertReview(
 
   if (existingIdx >= 0) {
     const prev = reviews[existingIdx];
+    const sameQuiz =
+      Boolean(fingerprint) &&
+      fingerprint === prev.comprehension_fingerprint &&
+      prev.commit_sha === payload.commit_sha;
+    const keepPass = sameQuiz && Boolean(prev.comprehension_passed);
+
     const updated: Review = {
       ...prev,
       ...payload,
       comprehension,
-      // New commit resets comprehension unless already merged
-      comprehension_passed:
-        prev.commit_sha === payload.commit_sha ? prev.comprehension_passed : false,
-      comprehension_attempt:
-        prev.commit_sha === payload.commit_sha ? prev.comprehension_attempt : null,
+      comprehension_fingerprint: fingerprint,
+      // Reset quiz whenever the question pack changes (even on same commit / CI re-run)
+      comprehension_passed: keepPass,
+      comprehension_attempt: keepPass ? prev.comprehension_attempt : null,
       status:
         payload.status ??
         (prev.status === "merged"
           ? "merged"
-          : comprehension && !prev.comprehension_passed
-            ? "pending_comprehension"
-            : prev.status === "pending_comprehension" && prev.comprehension_passed
-              ? "pending_review"
-              : prev.status),
+          : keepPass
+            ? "pending_review"
+            : "pending_comprehension"),
       updatedAt: now,
     };
     reviews[existingIdx] = updated;
@@ -228,6 +272,7 @@ export async function upsertReview(
     steps: payload.steps,
     summary: payload.summary,
     comprehension,
+    comprehension_fingerprint: fingerprint,
     comprehension_passed: false,
     comprehension_attempt: null,
   };

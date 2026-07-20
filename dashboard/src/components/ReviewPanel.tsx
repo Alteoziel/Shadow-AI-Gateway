@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -11,6 +11,38 @@ import {
   YAxis,
 } from "recharts";
 import type { Review, StepResult } from "@/lib/store";
+
+const SECRET_KEY = "governance_reviewer_secret";
+
+function getReviewerSecret(): string {
+  if (typeof window === "undefined") return "";
+  return sessionStorage.getItem(SECRET_KEY) || "";
+}
+
+function setReviewerSecret(value: string) {
+  sessionStorage.setItem(SECRET_KEY, value);
+}
+
+function ensureReviewerSecret(): string | null {
+  let secret = getReviewerSecret();
+  if (!secret) {
+    secret =
+      window.prompt(
+        "Enter reviewer secret (GOVERNANCE_DASHBOARD_SECRET or GOVERNANCE_REVIEWER_SECRET):"
+      ) || "";
+    if (!secret) return null;
+    setReviewerSecret(secret);
+  }
+  return secret;
+}
+
+function authHeaders(): HeadersInit {
+  const secret = getReviewerSecret();
+  return {
+    "Content-Type": "application/json",
+    ...(secret ? { "X-Governance-Reviewer-Secret": secret } : {}),
+  };
+}
 
 function statusColor(status: Review["status"]) {
   switch (status) {
@@ -117,6 +149,45 @@ type PublicQuestion = {
   choices: string[];
 };
 
+function ReviewerUnlock() {
+  const [hasSecret, setHasSecret] = useState(false);
+
+  useEffect(() => {
+    setHasSecret(Boolean(getReviewerSecret()));
+  }, []);
+
+  return (
+    <div className="mb-4 rounded-md bg-black/25 px-3 py-2 text-sm text-mist">
+      {hasSecret ? (
+        <span>
+          Reviewer secret loaded for this browser session.{" "}
+          <button
+            type="button"
+            className="text-signal underline"
+            onClick={() => {
+              sessionStorage.removeItem(SECRET_KEY);
+              setHasSecret(false);
+            }}
+          >
+            Clear
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="rounded-md bg-white/10 px-3 py-1 text-white hover:bg-white/20"
+          onClick={() => {
+            const s = ensureReviewerSecret();
+            setHasSecret(Boolean(s));
+          }}
+        >
+          Unlock actions (enter reviewer secret)
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ComprehensionPanel({ review }: { review: Review }) {
   const pack = review.comprehension;
   const questions = (pack?.questions ?? []) as PublicQuestion[];
@@ -136,7 +207,8 @@ function ComprehensionPanel({ review }: { review: Review }) {
     return (
       <section className="mb-8 rounded-lg border border-dashed border-white/15 p-5 text-sm text-mist">
         No comprehension quiz attached yet. Re-run the guardrail suite so Step 6
-        can generate a beginner study guide + quiz for this PR.
+        can generate a beginner study guide + quiz for this PR. Approve/Merge stay
+        locked until a quiz exists and is passed.
       </section>
     );
   }
@@ -149,24 +221,34 @@ function ComprehensionPanel({ review }: { review: Review }) {
           Step 6 · Comprehension passed
         </p>
         <p className="mt-2 text-white">
-          You scored {attempt ? `${attempt.correct}/${attempt.total} (${Math.round(attempt.score * 100)}%)` : "a passing mark"}.
-          Step 7 approve/merge is unlocked.
+          You scored{" "}
+          {attempt
+            ? `${attempt.correct}/${attempt.total} (${Math.round(attempt.score * 100)}%)`
+            : "a passing mark"}
+          . Step 7 approve/merge is unlocked (suite must also be green to merge).
         </p>
       </section>
     );
   }
 
   async function submit() {
+    if (!ensureReviewerSecret()) {
+      setMessage("Reviewer secret required to submit the quiz.");
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
       const res = await fetch(`/api/reviews/${review.id}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ action: "submit_quiz", answers }),
       });
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 401) {
+          sessionStorage.removeItem(SECRET_KEY);
+        }
         setMessage(data.message || data.error || "Quiz submit failed");
         return;
       }
@@ -198,7 +280,8 @@ function ComprehensionPanel({ review }: { review: Review }) {
       <p className="mt-2 max-w-3xl text-sm text-mist">
         You are learning — that is expected. Merging AI-written code you cannot
         explain is the danger. Read the guide, then pass the quiz (≥{" "}
-        {Math.round((pack.pass_threshold ?? 0.8) * 100)}%) before Approve &amp; Merge unlocks.
+        {Math.round((pack.pass_threshold ?? 0.8) * 100)}%) before Approve &amp; Merge
+        unlocks.
       </p>
 
       <div className="mt-6 space-y-5 text-sm">
@@ -226,7 +309,10 @@ function ComprehensionPanel({ review }: { review: Review }) {
             <h4 className="font-semibold text-white">Key functions</h4>
             <ul className="mt-2 space-y-2">
               {guide.key_functions.map((fn) => (
-                <li key={`${fn.file}-${fn.name}`} className="rounded-md bg-black/30 px-3 py-2">
+                <li
+                  key={`${fn.file}-${fn.name}`}
+                  className="rounded-md bg-black/30 px-3 py-2"
+                >
                   <code className="text-white">{fn.name}</code>
                   <span className="text-mist"> · {fn.file}</span>
                   <p className="mt-1 text-white/80">{fn.plain_english}</p>
@@ -265,14 +351,23 @@ function ComprehensionPanel({ review }: { review: Review }) {
               <span className="text-mist">
                 {i + 1}. [{q.category_label || q.category}]
               </span>{" "}
-              <span dangerouslySetInnerHTML={{ __html: q.prompt.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>") }} />
+              <span
+                dangerouslySetInnerHTML={{
+                  __html: q.prompt.replace(
+                    /\*\*(.*?)\*\*/g,
+                    "<strong>$1</strong>"
+                  ),
+                }}
+              />
             </legend>
             <div className="space-y-1">
               {q.choices.map((choice, idx) => (
                 <label
                   key={idx}
                   className={`flex cursor-pointer gap-2 rounded-md px-3 py-2 text-sm ${
-                    answers[q.id] === idx ? "bg-signal/20 text-white" : "bg-black/25 text-white/85"
+                    answers[q.id] === idx
+                      ? "bg-signal/20 text-white"
+                      : "bg-black/25 text-white/85"
                   }`}
                 >
                   <input
@@ -280,7 +375,9 @@ function ComprehensionPanel({ review }: { review: Review }) {
                     className="mt-1"
                     name={q.id}
                     checked={answers[q.id] === idx}
-                    onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: idx }))}
+                    onChange={() =>
+                      setAnswers((prev) => ({ ...prev, [q.id]: idx }))
+                    }
                   />
                   <span>{choice}</span>
                 </label>
@@ -315,9 +412,11 @@ function ComprehensionPanel({ review }: { review: Review }) {
 }
 
 export function ReviewActions({ review }: { review: Review }) {
-  const locked = Boolean(review.comprehension && !review.comprehension_passed);
-
   async function act(action: "approve" | "reject" | "merge") {
+    if (!ensureReviewerSecret()) {
+      alert("Reviewer secret required.");
+      return;
+    }
     const note =
       action === "reject"
         ? window.prompt("Rejection note (optional):") ?? ""
@@ -328,22 +427,28 @@ export function ReviewActions({ review }: { review: Review }) {
           : "";
     const res = await fetch(`/api/reviews/${review.id}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({ action, note }),
     });
     const data = await res.json();
     if (!res.ok) {
+      if (res.status === 401) {
+        sessionStorage.removeItem(SECRET_KEY);
+      }
       alert(data.message || data.error || "Action failed");
       return;
     }
     window.location.reload();
   }
 
+  const quizLocked = !review.comprehension || !review.comprehension_passed;
+  const mergeLocked = quizLocked || !review.passed;
+
   return (
     <div className="mt-6 flex flex-wrap gap-3">
       <button
         type="button"
-        disabled={locked}
+        disabled={quizLocked}
         onClick={() => act("approve")}
         className="rounded-md bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
       >
@@ -358,7 +463,7 @@ export function ReviewActions({ review }: { review: Review }) {
       </button>
       <button
         type="button"
-        disabled={locked}
+        disabled={mergeLocked}
         onClick={() => act("merge")}
         className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
       >
@@ -366,7 +471,11 @@ export function ReviewActions({ review }: { review: Review }) {
       </button>
       <p className={`w-full text-sm ${statusColor(review.status)}`}>
         Status: {review.status.replaceAll("_", " ")}
-        {locked ? " · complete Step 6 quiz to unlock merge" : ""}
+        {!review.comprehension_passed
+          ? " · complete Step 6 quiz to unlock"
+          : !review.passed
+            ? " · suite failed — merge blocked"
+            : ""}
       </p>
     </div>
   );
@@ -384,12 +493,14 @@ export function ReviewDetail({ review }: { review: Review }) {
           {review.pr_number ? ` · PR #${review.pr_number}` : ""}
         </h2>
         <p className="mt-2 text-sm text-mist">
-          Suite: {review.passed ? "passed automated gates" : "failed automated gates"} ·{" "}
+          Suite:{" "}
+          {review.passed ? "passed automated gates" : "failed automated gates"} ·{" "}
           {String(review.summary?.blocking_findings ?? 0)} blocking · commit{" "}
           <code className="text-white/80">
             {review.commit_sha?.slice(0, 8) ?? "n/a"}
           </code>
         </p>
+        <ReviewerUnlock />
         <ReviewActions review={review} />
       </header>
 

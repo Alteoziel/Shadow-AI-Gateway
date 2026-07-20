@@ -114,22 +114,28 @@ def post_inline_comments(report: PipelineReport, commit_sha: str | None = None) 
 
 
 def post_to_dashboard(report: PipelineReport) -> dict[str, Any] | None:
-    """POST pipeline results to the Step 6 review dashboard API."""
+    """POST pipeline results to the Step 7 review dashboard API.
+
+    Soft-fails: dashboard outages must not fail an otherwise-green CI job.
+    """
     endpoint = os.getenv("GOVERNANCE_DASHBOARD_URL")
     if not endpoint:
         return None
     secret = os.getenv("GOVERNANCE_DASHBOARD_SECRET", "")
-    with httpx.Client(timeout=30.0) as client:
-        resp = client.post(
-            f"{endpoint.rstrip('/')}/api/reviews",
-            headers={
-                "Content-Type": "application/json",
-                "X-Governance-Secret": secret,
-            },
-            json=report.model_dump(),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{endpoint.rstrip('/')}/api/reviews",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Governance-Secret": secret,
+                },
+                json=report.model_dump(),
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:  # noqa: BLE001 — never fail the suite on dashboard I/O
+        return {"ok": False, "error": str(exc)}
 
 
 def _inline_body(finding: Finding) -> str:

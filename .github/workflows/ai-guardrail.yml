@@ -40,26 +40,36 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
-          # Optional: set these repo secrets to enable LLM OWASP review + dashboard
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOVERNANCE_LLM_API_KEY: ${{ secrets.GOVERNANCE_LLM_API_KEY }}
           GOVERNANCE_LLM_MODEL: ${{ vars.GOVERNANCE_LLM_MODEL }}
           GOVERNANCE_DASHBOARD_URL: ${{ secrets.GOVERNANCE_DASHBOARD_URL }}
           GOVERNANCE_DASHBOARD_SECRET: ${{ secrets.GOVERNANCE_DASHBOARD_SECRET }}
         run: |
-          ai-guardrail run \
-            --root .. \
-            --changed-only \
-            --base-ref origin/${{ github.base_ref }} \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --commit-sha "${{ github.event.pull_request.head.sha }}" \
-            --repo "${{ github.repository }}" \
-            --json-out /tmp/guardrail-report.json \
-            --markdown-out /tmp/guardrail-report.md \
-            --comment-pr \
-            --inline-comments \
+          set -euo pipefail
+          ARGS=(
+            run
+            --root ..
+            --json-out /tmp/guardrail-report.json
+            --markdown-out /tmp/guardrail-report.md
             --post-dashboard
+          )
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ARGS+=(--changed-only --base-ref "origin/${{ github.base_ref }}")
+            ARGS+=(--pr-number "${{ github.event.pull_request.number }}")
+            ARGS+=(--commit-sha "${{ github.event.pull_request.head.sha }}")
+            ARGS+=(--repo "${{ github.repository }}")
+            ARGS+=(--comment-pr --inline-comments)
+          else
+            # workflow_dispatch: no PR context — scan full tree, skip PR flags
+            ARGS+=(--base-ref origin/main)
+            ARGS+=(--commit-sha "${{ github.sha }}")
+            ARGS+=(--repo "${{ github.repository }}")
+          fi
+
+          ai-guardrail "${ARGS[@]}"
 
       - name: Upload report artifact
         if: always()

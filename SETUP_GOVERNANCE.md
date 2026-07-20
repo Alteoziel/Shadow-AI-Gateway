@@ -47,8 +47,12 @@ Set on the dashboard host:
 
 | Env | Purpose |
 |-----|---------|
-| `GOVERNANCE_DASHBOARD_SECRET` | Shared secret for CI ingest |
+| `GOVERNANCE_DASHBOARD_SECRET` | **Required** shared secret for CI ingest + reviewer actions |
+| `GOVERNANCE_REVIEWER_SECRET` | Optional override for quiz/approve/merge (defaults to dashboard secret) |
+| `GOVERNANCE_ALLOW_INSECURE_DEV` | Local only (`true`); ignored in production |
 | `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | Fine-grained PAT with `contents:write` + `pull-requests:write` for **Approve & Merge** |
+
+On the dashboard UI, click **Unlock actions** and paste the same secret once per browser session.
 
 Then add Actions secrets:
 

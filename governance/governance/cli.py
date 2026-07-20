@@ -125,11 +125,16 @@ def run(
 
     if post_dashboard:
         result = post_to_dashboard(report)
-        console.print(
-            "Dashboard updated."
-            if result
-            else "Dashboard post skipped (set GOVERNANCE_DASHBOARD_URL)."
-        )
+        if result is None:
+            console.print(
+                "Dashboard post skipped (set GOVERNANCE_DASHBOARD_URL)."
+            )
+        elif result.get("ok") is False:
+            console.print(
+                f"[yellow]Dashboard post failed (non-blocking): {result.get('error')}[/yellow]"
+            )
+        else:
+            console.print("Dashboard updated.")
 
     if fail_on_error and not report.passed:
         raise typer.Exit(code=1)

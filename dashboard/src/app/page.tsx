@@ -2,7 +2,7 @@ import Link from "next/link";
 import {
   getReview,
   listReviews,
-  publicComprehension,
+  sanitizeReviewForClient,
   type Review,
 } from "@/lib/store";
 import { ReviewDetail } from "@/components/ReviewPanel";
@@ -13,19 +13,13 @@ type Props = {
   searchParams: Promise<{ id?: string }>;
 };
 
-function forClient(review: Review): Review {
-  return {
-    ...review,
-    // Strip answer keys from the RSC → client payload
-    comprehension: publicComprehension(review.comprehension) as Review["comprehension"],
-  };
-}
-
 export default async function HomePage({ searchParams }: Props) {
   const { id } = await searchParams;
   const reviews = await listReviews();
   const selectedRaw = id ? await getReview(id) : reviews[0] ?? null;
-  const selected = selectedRaw ? forClient(selectedRaw) : null;
+  const selected = selectedRaw
+    ? sanitizeReviewForClient(selectedRaw)
+    : null;
 
   return (
     <main>
@@ -83,7 +77,7 @@ export default async function HomePage({ searchParams }: Props) {
 
         <div>
           {selected ? (
-            <ReviewDetail review={selected} />
+            <ReviewDetail review={selected as Review} />
           ) : (
             <div className="rounded-xl border border-dashed border-white/15 p-10 text-mist">
               Waiting for the first guardrail report from GitHub Actions.
