@@ -3,17 +3,26 @@ import {
   authorizeIngest,
   unauthorizedResponse,
 } from "@/lib/auth";
+import { parseIngestBody } from "@/lib/ingest";
 import {
+  dashboardReviewUrl,
+  setGovernanceQuizStatus,
+} from "@/lib/github";
+import {
+  getStoreStatus,
   listReviews,
   upsertReview,
   sanitizeReviewForClient,
-  type StepResult,
 } from "@/lib/store";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const reviews = await listReviews();
   return NextResponse.json({
     reviews: reviews.map(sanitizeReviewForClient),
+    store: getStoreStatus(),
   });
 }
 
@@ -22,18 +31,33 @@ export async function POST(req: NextRequest) {
     return unauthorizedResponse("ingest");
   }
 
-  const body = await req.json();
-  const review = await upsertReview({
-    passed: Boolean(body.passed),
-    pr_number: body.pr_number ?? null,
-    commit_sha: body.commit_sha ?? null,
-    repo: body.repo ?? null,
-    steps: (body.steps ?? []) as StepResult[],
-    summary: body.summary ?? {},
+  const body = await req.json().catch(() => null);
+  const parsed = parseIngestBody(body);
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: "invalid_payload", message: parsed.error },
+      { status: 400 }
+    );
+  }
+
+  const review = await upsertReview(parsed.data);
+
+  // Keep the branch-protection check in sync with quiz state for this SHA.
+  const quizStatus = await setGovernanceQuizStatus({
+    repo: review.repo,
+    commitSha: review.commit_sha,
+    state: review.comprehension_passed ? "success" : "pending",
+    description: review.comprehension_passed
+      ? "Comprehension quiz passed for this commit."
+      : "Take the Step 6 comprehension quiz on the governance dashboard.",
+    targetUrl: dashboardReviewUrl(review.id),
   });
 
   return NextResponse.json(
-    { review: sanitizeReviewForClient(review) },
+    {
+      review: sanitizeReviewForClient(review),
+      quiz_status: quizStatus,
+    },
     { status: 201 }
   );
 }

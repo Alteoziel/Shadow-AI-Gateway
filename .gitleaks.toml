@@ -1,0 +1,19 @@
+# Gitleaks — Layer B (secret scanning)
+title = "Shadow AI Gateway gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Benign placeholders and test fixtures"
+paths = [
+  '''\.env\.example$''',
+  '''governance/governance/signatures/.*''',
+  '''dashboard/\.env\.example$''',
+  '''ENTERPRISE_LAYERS\.md$''',
+]
+regexes = [
+  '''change-me-to-a-long-random-string''',
+  '''your_.*_here''',
+  '''sk-live-aaaaaaaaaaaaaaaaaaaaaaaa''',
+]
