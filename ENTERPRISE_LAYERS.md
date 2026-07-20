@@ -22,9 +22,9 @@ CodeQL runs as a sibling job: **`CodeQL (Layer C)`** — advisory until you enab
 
 ## Manual follow-ups (cannot automate fully)
 
-1. Branch protection → require `Enterprise Layers B–E` (add CodeQL only after Code scanning is enabled and the job uploads successfully)
-2. Repo → Settings → Code security → enable **Code scanning** (needed for CodeQL uploads)
-3. Branch protection → **Require review from Code Owners** (uses `.github/CODEOWNERS`)
+1. Branch protection → require **`Enterprise Layers B–E`**
+2. Branch protection → **Require review from Code Owners** (uses `.github/CODEOWNERS`)
+3. Repo → Settings → Code security → enable **Code scanning**, then set `upload: true` on the CodeQL job in `enterprise-hygiene.yml` and require **`CodeQL (Layer C)`**
 4. Repo → Settings → Code security → enable **Secret scanning** / push protection (GitHub UI)
 5. Deploy governance dashboard (browser quiz) — see `SETUP_GOVERNANCE.md`
 

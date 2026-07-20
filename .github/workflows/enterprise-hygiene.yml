@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
   actions: read
 
 jobs:
@@ -41,10 +40,18 @@ jobs:
           pip install -e ".[dev]"
 
       # ── Layer B: secrets + dependency audit ─────────────────────────
+      # Binary scan (no pull-requests API / org license required).
       - name: "B · Gitleaks secret scan"
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks detect \
+            --source . \
+            --config .gitleaks.toml \
+            --verbose \
+            --redact \
+            --exit-code 1
 
       - name: "B · pip-audit (gateway)"
         run: pip-audit --progress-spinner off
@@ -58,7 +65,6 @@ jobs:
 
       - name: "B · npm audit (dashboard)"
         working-directory: dashboard
-        # High/critical only; advisory findings should not block the learning PR.
         continue-on-error: true
         run: |
           npm ci
@@ -79,7 +85,6 @@ jobs:
             --error \
             --metrics off \
             app tests
-          # Pack rules are informational in first land; custom rules above are hard-fail.
           semgrep scan \
             --config p/python \
             --config p/owasp-top-ten \
@@ -112,16 +117,16 @@ jobs:
           output_format: cli
           config_file: infra/terraform/.checkov.yml
 
-  # Requires repo Settings → Code security → Code scanning enabled.
-  # Until then this job is advisory (continue-on-error) so hygiene can go green.
+  # Runs analysis without uploading (repo Code scanning not enabled yet).
+  # After enabling Code scanning in Settings → Code security, set upload: true
+  # and require this check in branch protection.
   codeql:
     name: CodeQL (Layer C)
     runs-on: ubuntu-latest
-    continue-on-error: true
     permissions:
-      security-events: write
       contents: read
       actions: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - name: Initialize CodeQL
@@ -133,3 +138,5 @@ jobs:
         uses: github/codeql-action/autobuild@v3
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
+        with:
+          upload: false
