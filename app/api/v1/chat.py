@@ -101,9 +101,13 @@ async def chat_completions(
     payload = _build_upstream_payload(request_body, normalized)
 
     if request_body.stream:
-        # Do NOT aclose the provider in a finally here — that would close the
-        # shared httpx client before FastAPI finishes streaming the body.
-        upstream = await provider.chat_completion_stream(payload)
+        # Hand off aclose to the stream consumer. If setup fails before that,
+        # close here so the httpx client does not leak.
+        try:
+            upstream = await provider.chat_completion_stream(payload)
+        except Exception:
+            await provider.aclose()
+            raise
         return await relay_sse_stream(upstream, on_complete=provider.aclose)
 
     try:

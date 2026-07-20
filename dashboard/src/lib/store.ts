@@ -238,6 +238,21 @@ export async function upsertReview(
       prev.commit_sha === payload.commit_sha;
     const keepPass = sameQuiz && Boolean(prev.comprehension_passed);
 
+    let nextStatus: ReviewStatus;
+    if (payload.status) {
+      nextStatus = payload.status;
+    } else if (prev.status === "merged") {
+      nextStatus = "merged";
+    } else if (!sameQuiz) {
+      // New/changed quiz pack from CI → require comprehension again
+      nextStatus = "pending_comprehension";
+    } else if (prev.status === "approved" || prev.status === "rejected") {
+      // Same quiz — do not clobber a human decision on CI re-ingest
+      nextStatus = prev.status;
+    } else {
+      nextStatus = keepPass ? "pending_review" : "pending_comprehension";
+    }
+
     const updated: Review = {
       ...prev,
       ...payload,
@@ -246,13 +261,7 @@ export async function upsertReview(
       // Reset quiz whenever the question pack changes (even on same commit / CI re-run)
       comprehension_passed: keepPass,
       comprehension_attempt: keepPass ? prev.comprehension_attempt : null,
-      status:
-        payload.status ??
-        (prev.status === "merged"
-          ? "merged"
-          : keepPass
-            ? "pending_review"
-            : "pending_comprehension"),
+      status: nextStatus,
       updatedAt: now,
     };
     reviews[existingIdx] = updated;
