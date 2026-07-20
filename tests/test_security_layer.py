@@ -21,8 +21,8 @@ from app.security.egress import (
 def test_egress_allows_openai_and_anthropic() -> None:
     assert is_allowed_url("https://api.openai.com/v1/chat/completions")
     assert is_allowed_url("https://api.anthropic.com/v1/messages")
-    assert "api.openai.com" in ALLOWED_HOSTS
-    assert "api.anthropic.com" in ALLOWED_HOSTS
+    # Exact host membership (avoid substring checks CodeQL flags as weak URL sanitization)
+    assert ALLOWED_HOSTS == frozenset({"api.openai.com", "api.anthropic.com"})
     assert_allowed_host("api.openai.com")
     assert_allowed_host("API.Anthropic.Com")
 
