@@ -3,9 +3,50 @@
 > **THE LEDGER** — Single source of truth for all agents, humans, and reviewers.
 > Read this file before any developmental cycle. Keep it current when phase status changes.
 
-**Last updated:** 2026-07-19  
+**Last updated:** 2026-07-20  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
-**Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)
+**Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
+**Pre-merge gate:** AI Governance Engine (Steps 1–6) — `in_progress` (suite + CI + dashboard scaffolded)
+
+---
+
+## 0. Pre-Merge Gate — AI Governance Engine (Steps 1–6)
+
+> **Why this exists before more gateway code ships:** Today the only automated checks on PRs are Vercel deployment status and Cursor Bugbot. Those do **not** enforce AST structure, OWASP patterns, boundary fuzzing, Big-O profiling, or copyright similarity. This suite is the missing merge gate for `main`.
+
+### What was added (2026-07-20)
+
+| Piece | Path | Role |
+|-------|------|------|
+| Steps 1–5 CLI | `governance/` | Local + CI analysis suite (`ai-guardrail`) |
+| CI workflow | `.github/workflows/ai-guardrail.yml` | Runs on every PR → `main` |
+| Step 6 dashboard | `dashboard/` | Human review + Approve/Merge via GitHub API |
+| Signature DB | `governance/governance/signatures/known_snippets.json` | Copyright fingerprints |
+
+### The six steps
+
+| # | Name | Implementation | Blocks merge? |
+|---|------|----------------|---------------|
+| 1 | AST Guardrail | `ast` node walk — nested loops, forbidden calls | Yes (error/critical) |
+| 2 | Security Auditor | Deterministic OWASP regex + optional LLM diff review | Yes (error/critical) |
+| 3 | Fuzz Chamber | Subprocess boundary injection (`null`, `[]`, huge payloads) | Yes (crashes) |
+| 4 | Benchmark Engine | Empirical timing at N=10…10k → Big-O slope | Informational (extensible) |
+| 5 | Copyright Filter | Rabin-Karp rolling hash + Levenshtein vs signatures | Yes (high similarity) |
+| 6 | Human Review Panel | Next.js dashboard; merge webhook → GitHub REST | Human gate |
+
+### Plan adjustments (vs original 6-step deep dive)
+
+1. **Python-first suite** (not a separate Node CLI) — matches the gateway stack and uses stdlib `ast` instead of Babel. The dashboard remains Next.js/TS as planned.
+2. **Governance is a parallel track**, not a 5th gateway phase — it gates *all* phases including Phase 1 checkpoint work.
+3. **LLM security review is optional** — deterministic OWASP rules always run (no secret required). Set `GOVERNANCE_LLM_API_KEY` / `OPENAI_API_KEY` to enable high-reasoning diff review.
+4. **Fuzz sandbox starts as subprocess**; Docker isolation is a later hardening (same crawl→run pattern as the gateway).
+5. **Dashboard storage starts as JSON file** (`.data/reviews.json`); migrate to Supabase Postgres when Phase 3 lands (same DB target — do not invent a parallel store).
+6. **Vercel is OK for the dashboard only** — still forbidden for the streaming proxy (§8).
+7. **Bugbot + Vercel remain** — governance is additive, not a replacement.
+
+### Required human setup (for the gate to actually protect `main`)
+
+See **§11 Setup Checklist** below. Until branch protection requires the `Governance Steps 1–5` check, PRs can still merge without it.
 
 ---
 
@@ -190,7 +231,7 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 ---
 
-## 7. Target Repository Layout (Phase 1)
+## 7. Target Repository Layout
 
 ```text
 /
@@ -198,37 +239,42 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 ├── README.md
 ├── .env.example
 ├── .gitignore
-├── pyproject.toml
+├── pyproject.toml                       # Gateway (Phase 1+)
 ├── Dockerfile
 ├── fly.toml
 ├── render.yaml
 ├── docker-compose.yml
-├── app/
-│   ├── __init__.py
+├── .github/workflows/
+│   └── ai-guardrail.yml                 # Pre-merge governance CI
+├── app/                                 # Gateway service
 │   ├── main.py
 │   ├── config.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── health.py
-│   │   └── v1/
-│   │       ├── __init__.py
-│   │       └── chat.py
+│   ├── api/...
 │   ├── proxy/
-│   │   ├── __init__.py
 │   │   ├── interceptor.py               # ★ HUMAN CHECKPOINT #1
-│   │   ├── providers/
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py
-│   │   │   ├── openai.py
-│   │   │   └── anthropic.py
-│   │   └── streaming.py
-│   └── models/
-│       ├── __init__.py
-│       └── schemas.py
-└── tests/
-    ├── test_health.py
-    ├── test_interceptor_contract.py
-    └── test_proxy_routing.py
+│   │   └── providers/...
+│   └── models/...
+├── tests/                               # Gateway tests
+├── governance/                          # Steps 1–5 (Python CLI)
+│   ├── pyproject.toml
+│   ├── README.md
+│   ├── governance/
+│   │   ├── cli.py
+│   │   ├── pipeline.py
+│   │   ├── models.py
+│   │   ├── reporters/
+│   │   ├── signatures/known_snippets.json
+│   │   └── steps/
+│   │       ├── ast_guardrail.py         # Step 1
+│   │       ├── security_auditor.py      # Step 2
+│   │       ├── fuzz_chamber.py          # Step 3
+│   │       ├── benchmark_engine.py      # Step 4
+│   │       └── copyright_filter.py      # Step 5
+│   └── tests/
+└── dashboard/                           # Step 6 (Next.js review panel)
+    ├── package.json
+    ├── README.md
+    └── src/app/...
 ```
 
 ---
@@ -243,6 +289,8 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 6. **Supabase PostgreSQL** is the production database target (Phase 3); do not invent a parallel primary store.
 7. **Bugbot** is integrated for GitHub issue tracking; treat review findings as first-class work items.
 8. **Opus 4.8 and GPT-5.6 Sol** are restricted roles — do not invoke without explicit instruction.
+9. **No merge to `main` without the AI Guardrail check** once branch protection is enabled (§11). Agents must not disable or skip the workflow to land green builds.
+10. **Dashboard may use Vercel; the streaming gateway may not.**
 
 ---
 
@@ -262,3 +310,70 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-07-19 | Initial Ledger created; Phase 1 scaffold kicked off; Checkpoint #1 armed | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Added §0 Pre-Merge Gate; scaffolded Steps 1–6 (`governance/`, CI workflow, `dashboard/`); §11 setup checklist | Senior Engineer (Grok 4.5) |
+
+---
+
+## 11. Setup Checklist — Make the Governance Gate Enforceable
+
+Without these steps, the suite runs in CI but GitHub will still allow merges on green Vercel/Bugbot alone.
+
+### A. Repository secrets & variables (GitHub → Settings → Secrets)
+
+| Secret / Var | Required? | Purpose |
+|--------------|-----------|---------|
+| _(none for core Steps 1,3,4,5)_ | — | Deterministic checks need no secrets |
+| `OPENAI_API_KEY` or `GOVERNANCE_LLM_API_KEY` | Optional | Enables Step 2 LLM OWASP review of the PR diff |
+| `GOVERNANCE_DASHBOARD_URL` | Optional until dashboard is live | e.g. `https://your-dashboard.vercel.app` |
+| `GOVERNANCE_DASHBOARD_SECRET` | Required if dashboard URL set | Must match dashboard env |
+| `GOVERNANCE_LLM_MODEL` (variable) | Optional | Defaults to `gpt-4o-mini` |
+
+`GITHUB_TOKEN` is provided automatically by Actions for PR comments.
+
+### B. Branch protection on `main` (critical)
+
+GitHub → **Settings → Branches → Branch protection rule** for `main`:
+
+1. Require a pull request before merging
+2. Require status checks to pass → enable **`Governance Steps 1–5`**
+3. (Recommended) Do **not** allow bypassing for admins while learning the workflow
+4. Keep existing Vercel + Bugbot checks if desired — they stay complementary
+
+Until step 2 is enabled, the governance workflow is advisory only.
+
+### C. Deploy the Step 6 dashboard
+
+```bash
+cd dashboard
+npm install
+# Set GOVERNANCE_DASHBOARD_SECRET + GITHUB_TOKEN (merge rights)
+npm run build && npm start
+# or: deploy to Vercel and set the same env vars in the project
+```
+
+Create a fine-grained PAT / GitHub App token with `contents: write` + `pull-requests: write` on this repo for the **Approve & Merge** button (`GITHUB_TOKEN` / `GH_MERGE_TOKEN` on the dashboard host).
+
+### D. Local dry-run before pushing
+
+```bash
+cd governance && pip install -e ".[dev]" && pytest
+ai-guardrail run --root .. --skip-llm
+```
+
+### E. What you still do manually (resume-defensible CS)
+
+The suite is implemented end-to-end so CI works Day 1. Deepen ownership by extending:
+
+1. **AST** — add project-specific forbidden patterns (e.g. disallow sync `httpx` in `app/`)
+2. **Fuzz** — target real gateway helpers once Checkpoint #1 lands
+3. **Benchmark** — wire per-PR function injection instead of calibration profiles only
+4. **Copyright** — grow `known_snippets.json` with frameworks you must not paste
+5. **Dashboard** — swap `.data/reviews.json` for Supabase when Phase 3 starts
+
+### F. Relationship to Bugbot & Vercel
+
+| Check | What it catches | What it misses |
+|-------|-----------------|----------------|
+| Vercel | Dashboard deploy health | Gateway streaming safety, AST, OWASP, fuzz |
+| Bugbot | Reviewer-style code critique | Deterministic policy enforcement + merge gate |
+| **AI Guardrail** | Structural / security / fuzz / copyright policy | Product UX of the dashboard |

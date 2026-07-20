@@ -1,0 +1,196 @@
+"""Step 2 — Security Auditor: OWASP-oriented static + optional LLM review."""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+import httpx
+
+from governance.models import Finding, Severity, StepResult
+
+STEP_ID = "security_auditor"
+STEP_NAME = "Security Auditor (OWASP Scan)"
+
+# Deterministic pattern rules (always run — no API key required)
+OWASP_PATTERNS: list[tuple[str, Severity, str, re.Pattern[str]]] = [
+    (
+        "SEC001_HARDCODED_SECRET",
+        Severity.CRITICAL,
+        "Possible hardcoded secret / API key",
+        re.compile(
+            r"""(?i)(api[_-]?key|secret|password|token|private[_-]?key)\s*=\s*['\"][^'\"]{8,}['\"]"""
+        ),
+    ),
+    (
+        "SEC002_SQL_INJECTION",
+        Severity.CRITICAL,
+        "Possible SQL injection via string formatting",
+        re.compile(
+            r"""(?i)(execute|executemany)\s*\(\s*(f['\"]|['\"].*%|['\"].*\.format)"""
+        ),
+    ),
+    (
+        "SEC003_SHELL_INJECTION",
+        Severity.CRITICAL,
+        "Possible command injection (shell=True or os.system)",
+        re.compile(r"""(?i)(os\.system\s*\(|subprocess\.[a-z]+\([^)]*shell\s*=\s*True)"""),
+    ),
+    (
+        "SEC004_PICKLE",
+        Severity.ERROR,
+        "Unsafe deserialization (pickle) — remote code execution risk",
+        re.compile(r"""(?i)pickle\.(loads?|Unpickler)"""),
+    ),
+    (
+        "SEC005_SSRF",
+        Severity.WARNING,
+        "Outbound HTTP with user-controlled URL risk — validate allowlists",
+        re.compile(r"""(?i)(httpx\.(get|post|request)|requests\.(get|post)|urllib\.request)"""),
+    ),
+    (
+        "SEC006_PATH_TRAVERSAL",
+        Severity.WARNING,
+        "File open with dynamic path — guard against path traversal",
+        re.compile(r"""(?i)open\s*\(\s*(?!['\"])"""),
+    ),
+]
+
+SYSTEM_PROMPT = """You are an OWASP-focused secure-code reviewer for an enterprise AI proxy gateway.
+Review ONLY the provided git diff / code snippets.
+Flag: injection, secrets, auth bypass, insecure deserialization, SSRF, path traversal,
+overly permissive CORS, missing input validation on LLM proxy endpoints.
+Respond with JSON array only:
+[{"severity":"critical|error|warning|info","rule_id":"LLM_...","file":"...","line":null,"message":"...","suggestion":"..."}]
+If nothing found, return [].
+"""
+
+
+def _scan_patterns(path: Path, source: str) -> list[Finding]:
+    findings: list[Finding] = []
+    for rule_id, severity, message, pattern in OWASP_PATTERNS:
+        for match in pattern.finditer(source):
+            line = source[: match.start()].count("\n") + 1
+            # Allow .env.example style placeholders
+            snippet = match.group(0)
+            if "your_" in snippet.lower() or "changeme" in snippet.lower() or "xxx" in snippet.lower():
+                continue
+            findings.append(
+                Finding(
+                    step=STEP_ID,
+                    severity=severity,
+                    message=message,
+                    file=str(path),
+                    line=line,
+                    rule_id=rule_id,
+                    evidence=snippet[:120],
+                    suggestion="Remove secret, use env vars, or sanitize untrusted input.",
+                )
+            )
+    return findings
+
+
+def _llm_review(diff_text: str) -> list[Finding]:
+    """Optional high-reasoning model review of the PR diff."""
+    api_key = os.getenv("GOVERNANCE_LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return []
+    base_url = os.getenv("GOVERNANCE_LLM_BASE_URL", "https://api.openai.com/v1")
+    model = os.getenv("GOVERNANCE_LLM_MODEL", "gpt-4o-mini")
+
+    payload = {
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Review this diff:\n\n{diff_text[:60000]}"},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+    except Exception as exc:  # noqa: BLE001 — auditor must not crash the suite
+        return [
+            Finding(
+                step=STEP_ID,
+                severity=Severity.WARNING,
+                message=f"LLM security review skipped due to API error: {exc}",
+                rule_id="SEC_LLM_UNAVAILABLE",
+            )
+        ]
+
+    import json
+
+    try:
+        parsed = json.loads(content)
+        items = parsed if isinstance(parsed, list) else parsed.get("findings", parsed.get("issues", []))
+    except json.JSONDecodeError:
+        return []
+
+    findings: list[Finding] = []
+    for item in items or []:
+        sev = str(item.get("severity", "warning")).lower()
+        try:
+            severity = Severity(sev)
+        except ValueError:
+            severity = Severity.WARNING
+        findings.append(
+            Finding(
+                step=STEP_ID,
+                severity=severity,
+                message=item.get("message", "LLM security finding"),
+                file=item.get("file"),
+                line=item.get("line"),
+                rule_id=item.get("rule_id", "SEC_LLM"),
+                suggestion=item.get("suggestion"),
+            )
+        )
+    return findings
+
+
+def run(paths: list[Path], diff_text: str | None = None) -> StepResult:
+    """Run deterministic OWASP patterns + optional LLM review on diffs."""
+    findings: list[Finding] = []
+    scanned = 0
+    for path in paths:
+        if not path.is_file():
+            continue
+        if path.suffix not in {".py", ".ts", ".tsx", ".js", ".jsx", ".yml", ".yaml", ".toml"}:
+            continue
+        # Skip governance signature DB and example env
+        if path.name in {".env.example", "known_snippets.json"}:
+            continue
+        scanned += 1
+        source = path.read_text(encoding="utf-8", errors="replace")
+        findings.extend(_scan_patterns(path, source))
+
+    llm_used = False
+    if diff_text:
+        llm_findings = _llm_review(diff_text)
+        if llm_findings:
+            findings.extend(llm_findings)
+            llm_used = True
+
+    blocking = [f for f in findings if f.severity in (Severity.ERROR, Severity.CRITICAL)]
+    return StepResult(
+        step=STEP_ID,
+        name=STEP_NAME,
+        passed=len(blocking) == 0,
+        findings=findings,
+        metrics={
+            "files_scanned": scanned,
+            "findings": len(findings),
+            "blocking": len(blocking),
+            "llm_review": llm_used or bool(
+                os.getenv("GOVERNANCE_LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+            ),
+        },
+    )

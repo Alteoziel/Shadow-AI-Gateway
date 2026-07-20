@@ -4,11 +4,29 @@ Enterprise security proxy that sits between corporate users and public LLMs (Ope
 
 > **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger** — single source of truth for phases, checkpoints, and guardrails.
 
+## Pre-merge gate (AI Governance Engine)
+
+Before more gateway code ships, PRs are analyzed by a six-step suite:
+
+1. AST structure · 2. OWASP security · 3. Boundary fuzz · 4. Big-O bench · 5. Copyright filter · 6. Human review dashboard
+
+| Component | Path |
+|-----------|------|
+| CLI (Steps 1–5) | [`governance/`](governance/) |
+| GitHub Action | [`.github/workflows/ai-guardrail.yml`](.github/workflows/ai-guardrail.yml) |
+| Review panel (Step 6) | [`dashboard/`](dashboard/) |
+| Human setup checklist | Ledger **§11** + [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) |
+
+```bash
+cd governance && pip install -e ".[dev]" && ai-guardrail run --root ..
+```
+
 ## Phase 1 status
 
 - FastAPI async proxy with OpenAI + Anthropic provider adapters
 - Streaming and non-streaming `POST /v1/chat/completions`
 - **Human Checkpoint #1:** `app/proxy/interceptor.py` — returns `501` until implemented
+- Governance suite + CI + review dashboard scaffolded (see Ledger §0)
 
 ## Quickstart (local)
 

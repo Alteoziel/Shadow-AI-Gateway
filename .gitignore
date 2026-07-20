@@ -34,3 +34,10 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Governance / dashboard
+governance/.venv/
+dashboard/node_modules/
+dashboard/.next/
+dashboard/.data/
+dashboard/.env.local
