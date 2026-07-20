@@ -2,8 +2,8 @@
  * Lightweight review store.
  *
  * Default: JSON file under .data/ (local / single-instance).
- * Optional: set DATABASE_URL to a Postgres connection string later
- * (Phase 3 of the gateway plan uses Supabase — same target).
+ * This Step 7 hardening pass does not configure an env-backed database store.
+ * Phase 3 owns the future database migration.
  */
 
 import { createHash } from "crypto";
@@ -97,6 +97,7 @@ export type Review = {
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const STORE_PATH = path.join(DATA_DIR, "reviews.json");
+export const REVIEW_STORE_PATH = ".data/reviews.json";
 
 async function ensureStore(): Promise<Review[]> {
   await fs.mkdir(DATA_DIR, { recursive: true });

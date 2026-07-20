@@ -157,10 +157,17 @@ function ReviewerUnlock() {
   }, []);
 
   return (
-    <div className="mb-4 rounded-md bg-black/25 px-3 py-2 text-sm text-mist">
+    <div className="mb-4 rounded-md border border-white/10 bg-black/25 px-3 py-3 text-sm text-mist">
       {hasSecret ? (
-        <span>
-          Reviewer secret loaded for this browser session.{" "}
+        <div className="space-y-1">
+          <p className="font-semibold text-signal">
+            Review actions unlocked for this browser session.
+          </p>
+          <p>
+            Quiz, approve, reject, and merge calls send{" "}
+            <code>X-Governance-Reviewer-Secret</code>. If a request returns 401,
+            clear the saved secret and unlock again.
+          </p>
           <button
             type="button"
             className="text-signal underline"
@@ -169,20 +176,29 @@ function ReviewerUnlock() {
               setHasSecret(false);
             }}
           >
-            Clear
+            Clear saved reviewer secret
           </button>
-        </span>
+        </div>
       ) : (
-        <button
-          type="button"
-          className="rounded-md bg-white/10 px-3 py-1 text-white hover:bg-white/20"
-          onClick={() => {
-            const s = ensureReviewerSecret();
-            setHasSecret(Boolean(s));
-          }}
-        >
-          Unlock actions (enter reviewer secret)
-        </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-semibold text-warn">Review actions locked.</p>
+            <p>
+              Enter <code>GOVERNANCE_REVIEWER_SECRET</code> or the dashboard
+              secret to submit the quiz, approve, reject, or merge.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rounded-md bg-white/10 px-3 py-1 text-white hover:bg-white/20"
+            onClick={() => {
+              const s = ensureReviewerSecret();
+              setHasSecret(Boolean(s));
+            }}
+          >
+            Unlock actions
+          </button>
+        </div>
       )}
     </div>
   );
