@@ -25,8 +25,14 @@ class EgressDeniedError(PermissionError):
     """Raised when an outbound URL is not on the allowlist."""
 
 
-def is_allowed_url(url: str) -> bool:
-    """Return True if URL host is on the egress allowlist and uses https."""
+def is_allowed_url(url: object) -> bool:
+    """Return True if URL host is on the egress allowlist and uses https.
+
+    Non-string inputs are rejected (False) rather than crashing — callers and
+    the fuzz chamber both expect deny-by-default without AttributeError.
+    """
+    if not isinstance(url, str):
+        return False
     parsed = urlparse(url)
     if parsed.scheme != "https":
         return False
@@ -34,7 +40,9 @@ def is_allowed_url(url: str) -> bool:
     return host in ALLOWED_HOSTS
 
 
-def assert_allowed_url(url: str) -> None:
+def assert_allowed_url(url: object) -> None:
+    if not isinstance(url, str):
+        raise TypeError(f"url must be str, got {type(url).__name__}")
     if not is_allowed_url(url):
         raise EgressDeniedError(
             f"Egress denied for URL host (not on allowlist): {url!r}. "
@@ -42,7 +50,9 @@ def assert_allowed_url(url: str) -> None:
         )
 
 
-def assert_allowed_host(host: str) -> None:
+def assert_allowed_host(host: object) -> None:
+    if not isinstance(host, str):
+        raise TypeError(f"host must be str, got {type(host).__name__}")
     normalized = host.lower().strip()
     if normalized not in ALLOWED_HOSTS:
         raise EgressDeniedError(

@@ -18,14 +18,15 @@ Require this additional status check on `main`:
 
 (plus existing **`Governance Steps 1–6`**)
 
-CodeQL runs as a sibling job: **`CodeQL (Layer C)`** — also require it when it appears after the first green run.
+CodeQL runs as a sibling job: **`CodeQL (Layer C)`** — advisory until you enable **Code scanning** in repo Settings → Code security. After the first successful upload, require it in branch protection.
 
 ## Manual follow-ups (cannot automate fully)
 
-1. Branch protection → require `Enterprise Layers B–E` (+ CodeQL when listed)
-2. Branch protection → **Require review from Code Owners** (uses `.github/CODEOWNERS`)
-3. Repo → Settings → Code security → enable **Secret scanning** / push protection (GitHub UI)
-4. Deploy governance dashboard (browser quiz) — see `SETUP_GOVERNANCE.md`
+1. Branch protection → require `Enterprise Layers B–E` (add CodeQL only after Code scanning is enabled and the job uploads successfully)
+2. Repo → Settings → Code security → enable **Code scanning** (needed for CodeQL uploads)
+3. Branch protection → **Require review from Code Owners** (uses `.github/CODEOWNERS`)
+4. Repo → Settings → Code security → enable **Secret scanning** / push protection (GitHub UI)
+5. Deploy governance dashboard (browser quiz) — see `SETUP_GOVERNANCE.md`
 
 ## Learning map
 

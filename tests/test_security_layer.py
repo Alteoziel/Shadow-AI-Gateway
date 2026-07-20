@@ -30,10 +30,17 @@ def test_egress_allows_openai_and_anthropic() -> None:
 def test_egress_denies_http_and_unknown_hosts() -> None:
     assert not is_allowed_url("http://api.openai.com/v1/chat/completions")
     assert not is_allowed_url("https://evil.example.com/v1")
+    assert not is_allowed_url(None)
+    assert not is_allowed_url(-1)
+    assert not is_allowed_url({"__proto__": "x"})
     with pytest.raises(EgressDeniedError):
         assert_allowed_url("https://evil.example.com/exfil")
     with pytest.raises(EgressDeniedError):
         assert_allowed_host("evil.example.com")
+    with pytest.raises(TypeError):
+        assert_allowed_url(-1)
+    with pytest.raises(TypeError):
+        assert_allowed_host(None)
 
 
 @pytest.mark.asyncio
