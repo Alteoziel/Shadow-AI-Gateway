@@ -119,7 +119,7 @@ jobs:
         run: docker build -t shadow-ai-gateway:ci .
 
       - name: "E · Trivy image scan (CRITICAL+HIGH)"
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
         with:
           image-ref: shadow-ai-gateway:ci
           format: table
@@ -128,7 +128,7 @@ jobs:
           ignore-unfixed: true
 
       - name: "E · Trivy SBOM (SPDX)"
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # 0.36.0
         with:
           image-ref: shadow-ai-gateway:ci
           format: spdx-json
