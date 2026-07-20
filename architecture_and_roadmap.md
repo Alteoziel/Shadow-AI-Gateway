@@ -68,7 +68,7 @@ See **§11 Setup Checklist** below. Require status checks:
 - **`Enterprise Layers B–E`** (Dependabot/gitleaks/ruff/mypy/semgrep/tests/trivy/checkov — see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md))
 - **`CodeQL (Layer C)`** after it appears once
 
-Until those are required, workflows are advisory only.
+Protect Main ruleset now requires those three checks + Code Owner review + dismiss stale reviews. Remaining operator steps (secret push protection, signed commits, second reviewer, etc.) are listed in [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
 ---
 
@@ -76,10 +76,10 @@ Until those are required, workflows are advisory only.
 
 | Layer | Focus | Automations in repo |
 |-------|-------|---------------------|
-| B | Supply chain & secrets | Dependabot, Gitleaks, pip-audit, npm audit |
-| C | Static analysis | Ruff, Mypy, Semgrep, CodeQL, CODEOWNERS |
-| D | Product tests | API integration tests, egress/audit contracts, coverage ≥45% |
-| E | Ship & runtime | Egress allowlist, audit DDL scaffold, Trivy image scan, Terraform+Checkov |
+| B | Supply chain & secrets | Dependabot, checksummed Gitleaks, pip-audit, npm audit (high+ hard-fail) |
+| C | Static analysis | Ruff, Mypy, Semgrep (custom + ERROR packs), CodeQL upload, CODEOWNERS |
+| D | Product tests | API integration tests, egress/audit contracts, coverage ≥60% |
+| E | Ship & runtime | `EgressCheckedAsyncClient`, audit DDL, non-root Docker→Trivy CRITICAL+HIGH + SBOM, Terraform+Checkov |
 
 Details: [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
@@ -355,6 +355,7 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 | 2026-07-20 | Added §0 Pre-Merge Gate; scaffolded Steps 1–6 (`governance/`, CI workflow, `dashboard/`); §11 setup checklist | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Inserted Step 6 Comprehension Gate (beginner quiz); human review panel becomes Step 7; merge locked until ≥80% | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Landed Enterprise Layers B–E (Dependabot, Gitleaks, Ruff/Mypy/Semgrep/CodeQL, coverage floor, egress/audit, Trivy, Terraform+Checkov) | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Hardened Layers B–E: SHA-pinned Actions, checksummed Gitleaks, Semgrep packs hard-fail, Trivy CRITICAL+HIGH + SBOM, CodeQL upload, `EgressCheckedAsyncClient`, non-root image, coverage ≥60% | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -376,15 +377,15 @@ Without these steps, the suite runs in CI but GitHub will still allow merges on 
 
 ### B. Branch protection on `main` (critical)
 
-GitHub → **Settings → Branches → Branch protection rule** for `main`:
+Prefer the **Protect Main** ruleset (already active). Verify it still requires:
 
-1. Require a pull request before merging
-2. Require status checks to pass → enable **`Governance Steps 1–6`** and **`Enterprise Layers B–E`** (add **`CodeQL (Layer C)`** after it appears once)
-3. (Recommended) Enable **Require review from Code Owners** (uses `.github/CODEOWNERS`)
-4. (Recommended) Do **not** allow bypassing for admins while learning the workflow
-5. Keep existing Vercel + Bugbot checks if desired — they stay complementary
+1. Pull request before merging
+2. Status checks: **`Governance Steps 1–6`**, **`Enterprise Layers B–E`**, **`CodeQL (Layer C)`**
+3. **Require review from Code Owners**
+4. **Dismiss stale reviews** on new pushes
+5. No casual admin bypass
 
-Until step 2 is enabled, the governance / hygiene workflows are advisory only.
+Still do yourself (see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md)): secret scanning + push protection, Dependabot alerts, strict up-to-date branches, require approval of most recent push, signed commits, and a second CODEOWNER when you have a teammate.
 
 **Also enforce comprehension in practice:** even with CI green, use the dashboard’s Step 6 quiz before merge — Approve & Merge stays locked until you pass (≥80%).
 

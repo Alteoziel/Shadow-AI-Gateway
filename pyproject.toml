@@ -36,11 +36,12 @@ testpaths = ["tests"]
 addopts = [
     "--cov=app",
     "--cov-report=term-missing",
-    "--cov-fail-under=45",
+    "--cov-fail-under=60",
 ]
 
 [tool.coverage.run]
 branch = true
+# interceptor.py is Checkpoint #1 (NotImplementedError); keep omitted until implemented.
 omit = [
     "app/proxy/interceptor.py",
 ]

@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: enterprise-hygiene-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   actions: read
@@ -18,17 +22,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -40,12 +45,20 @@ jobs:
           pip install -e ".[dev]"
 
       # ── Layer B: secrets + dependency audit ─────────────────────────
-      # Binary scan (no pull-requests API / org license required).
+      # Checksum-verified binary (no org Gitleaks Action license required).
       - name: "B · Gitleaks secret scan"
+        env:
+          GITLEAKS_VERSION: "8.24.3"
+          GITLEAKS_SHA256: "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c"
         run: |
+          set -euo pipefail
+          ARCHIVE="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           curl -sSfL \
-            "https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin gitleaks
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${ARCHIVE}" \
+            -o "/tmp/${ARCHIVE}"
+          echo "${GITLEAKS_SHA256}  /tmp/${ARCHIVE}" | sha256sum -c -
+          sudo tar -xz -C /usr/local/bin -f "/tmp/${ARCHIVE}" gitleaks
+          gitleaks version
           gitleaks detect \
             --source . \
             --config .gitleaks.toml \
@@ -65,7 +78,6 @@ jobs:
 
       - name: "B · npm audit (dashboard)"
         working-directory: dashboard
-        continue-on-error: true
         run: |
           npm ci
           npm audit --audit-level=high
@@ -79,17 +91,21 @@ jobs:
 
       - name: "C · Semgrep"
         run: |
-          pip install semgrep
+          pip install "semgrep==1.110.0"
+          # Custom rules — hard fail
           semgrep scan \
             --config .semgrep.yml \
             --error \
             --metrics off \
             app tests
+          # Registry packs — hard fail on ERROR+ findings
           semgrep scan \
             --config p/python \
             --config p/owasp-top-ten \
+            --severity=ERROR \
+            --error \
             --metrics off \
-            app tests || true
+            app tests
 
       # ── Layer D: product tests + coverage ───────────────────────────
       - name: "D · Pytest + coverage floor"
@@ -99,17 +115,32 @@ jobs:
       - name: "E · Build gateway image"
         run: docker build -t shadow-ai-gateway:ci .
 
-      - name: "E · Trivy image scan"
-        uses: aquasecurity/trivy-action@0.35.0
+      - name: "E · Trivy image scan (CRITICAL+HIGH)"
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
         with:
           image-ref: shadow-ai-gateway:ci
           format: table
           exit-code: "1"
-          severity: CRITICAL
+          severity: CRITICAL,HIGH
           ignore-unfixed: true
 
+      - name: "E · Trivy SBOM (SPDX)"
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: shadow-ai-gateway:ci
+          format: spdx-json
+          output: gateway-sbom.spdx.json
+          exit-code: "0"
+
+      - name: "E · Upload SBOM artifact"
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gateway-sbom
+          path: gateway-sbom.spdx.json
+          if-no-files-found: error
+
       - name: "E · Checkov (Terraform)"
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@7b972723c44fb3d256283fac96fae5d7c1894bb7 # v12
         with:
           directory: infra/terraform
           framework: terraform
@@ -117,9 +148,7 @@ jobs:
           output_format: cli
           config_file: infra/terraform/.checkov.yml
 
-  # Runs analysis without uploading (repo Code scanning not enabled yet).
-  # After enabling Code scanning in Settings → Code security, set upload: true
-  # and require this check in branch protection.
+  # Uploads to GitHub Code Scanning (required by Protect Main ruleset).
   codeql:
     name: CodeQL (Layer C)
     runs-on: ubuntu-latest
@@ -128,15 +157,17 @@ jobs:
       actions: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@b7351df727350dca84cb9d725d57dcf5bc82ba26 # v3
         with:
           languages: python
           queries: security-extended
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@b7351df727350dca84cb9d725d57dcf5bc82ba26 # v3
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@b7351df727350dca84cb9d725d57dcf5bc82ba26 # v3
         with:
-          upload: false
+          upload: true

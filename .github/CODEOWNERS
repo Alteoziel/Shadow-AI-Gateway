@@ -1,6 +1,6 @@
 # CODEOWNERS — Layer C (who must review sensitive paths)
-# Replace @Alteoziel with additional teammates as the team grows.
-# Enable "Require review from Code Owners" in branch protection for enforcement.
+# Protect Main ruleset: Require review from Code Owners = ON.
+# Add teammates here as the team grows (solo self-review is still a residual risk).
 
 *                               @Alteoziel
 
@@ -9,5 +9,8 @@
 /app/security/                  @Alteoziel
 /governance/                    @Alteoziel
 /.github/workflows/             @Alteoziel
+/.github/dependabot.yml         @Alteoziel
+/.github/CODEOWNERS             @Alteoziel
 /infra/                         @Alteoziel
 /architecture_and_roadmap.md    @Alteoziel
+/ENTERPRISE_LAYERS.md           @Alteoziel

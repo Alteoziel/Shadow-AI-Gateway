@@ -23,7 +23,7 @@ cd governance && pip install -e ".[dev]" && ai-guardrail run --root ..
 ai-guardrail quiz --root .. --skip-llm   # practice understanding the change
 ```
 
-Require both status checks on `main`: **`Governance Steps 1–6`** and **`Enterprise Layers B–E`**.
+Require status checks on `main`: **`Governance Steps 1–6`**, **`Enterprise Layers B–E`**, and **`CodeQL (Layer C)`**. Operator checklist: [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
 ## Phase 1 status
 

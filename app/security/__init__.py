@@ -8,11 +8,13 @@ from app.security.egress import (
     assert_allowed_url,
     is_allowed_url,
 )
+from app.security.http import EgressCheckedAsyncClient
 
 __all__ = [
     "ALLOWED_HOSTS",
     "AuditEvent",
     "AuditEventType",
+    "EgressCheckedAsyncClient",
     "EgressDeniedError",
     "InMemoryAuditSink",
     "assert_allowed_host",
