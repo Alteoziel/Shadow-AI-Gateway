@@ -1,65 +1,74 @@
 # Shadow AI Guardrail Gateway — Architecture & Roadmap
 
-> **THE LEDGER** — Single source of truth for all agents, humans, and reviewers.
-> Read this file before any developmental cycle. Keep it current when phase status changes.
+> ## THE LEDGER IS LAW
+>
+> This file is the **single source of truth** and the **binding constitution** for every
+> agent, subagent, reviewer, and human working in this repository.
+>
+> - If an instruction conflicts with The Ledger, **The Ledger wins**.
+> - If a model wants to "just quickly implement," **stop** and follow QRSPI + guardrails.
+> - If a Human Hands-On checkpoint is open, agents **must not** fill it.
+> - Read this file **before** any developmental cycle. Keep phase/checkpoint status current.
 
 **Last updated:** 2026-07-20  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
-**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (comprehension gate added)
+**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (required check on `main`)  
+**Task workflow:** **QRSPI is mandatory** — see §5 and [`.cursor/qrspi/`](.cursor/qrspi/)
 
 ---
 
 ## 0. Pre-Merge Gate — AI Governance Engine (Steps 1–7)
 
-> **Why this exists before more gateway code ships:** Today the only automated checks on PRs are Vercel deployment status and Cursor Bugbot. Those do **not** enforce AST structure, OWASP patterns, boundary fuzzing, Big-O profiling, copyright similarity, or — critically — that **you understand the change**. This suite is the missing merge gate for `main`.
+> **Why this exists:** Vercel + Bugbot alone do **not** enforce AST structure, OWASP patterns,
+> fuzzing, Big-O, copyright, or that **you understand the change**. This suite is the merge gate.
 
-### What was added (2026-07-20)
+### What ships the gate
 
 | Piece | Path | Role |
 |-------|------|------|
 | Steps 1–6 CLI | `governance/` | Local + CI analysis suite (`ai-guardrail`) |
-| CI workflow | `.github/workflows/ai-guardrail.yml` | Runs on every PR → `main` |
-| Step 6 Comprehension | `governance/.../comprehension_gate.py` | Beginner study guide + quiz (blocks merge until passed) |
-| Step 7 dashboard | `dashboard/` | Human review + Approve/Merge via GitHub API |
+| CI workflow | `.github/workflows/ai-guardrail.yml` | Runs on every PR → `main` (check name: **Governance Steps 1–6**) |
+| Step 6 Comprehension | `governance/.../comprehension_gate.py` | Beginner study guide + quiz |
+| Step 7 dashboard | `dashboard/` | Human quiz + Approve/Merge via GitHub API |
 | Signature DB | `governance/governance/signatures/known_snippets.json` | Copyright fingerprints |
 
 ### The seven steps
 
-| # | Name | Implementation | Blocks merge? |
-|---|------|----------------|---------------|
-| 1 | AST Guardrail | `ast` node walk — nested loops, forbidden calls | Yes (error/critical) |
-| 2 | Security Auditor | Deterministic OWASP regex + optional LLM diff review | Yes (error/critical) |
-| 3 | Fuzz Chamber | Subprocess boundary injection (`null`, `[]`, huge payloads) | Yes (crashes) |
-| 4 | Benchmark Engine | Empirical timing at N=10…10k → Big-O slope | Informational (extensible) |
-| 5 | Copyright Filter | Rabin-Karp rolling hash + Levenshtein vs signatures | Yes (high similarity) |
-| 6 | **Comprehension Gate** | Beginner study guide + quiz (vocab, flow, deps, manual tasks, security) | **Yes — dashboard requires ≥80% before Approve/Merge** |
-| 7 | Human Review Panel | Next.js dashboard; merge webhook → GitHub REST | Human gate (after quiz) |
+| # | Name | Blocks merge? |
+|---|------|---------------|
+| 1 | AST Guardrail | Yes (error/critical) — **in Actions** |
+| 2 | Security Auditor | Yes (error/critical) — **in Actions** |
+| 3 | Fuzz Chamber | Yes (crashes) — **in Actions** |
+| 4 | Benchmark Engine | Informational — **in Actions** |
+| 5 | Copyright Filter | Yes (high similarity) — **in Actions** |
+| 6 | **Comprehension Gate** | Quiz **generated** in Actions; **human pass (≥80%) on dashboard / local CLI** before Approve & Merge |
+| 7 | Human Review Panel | Dashboard approve/merge (after quiz) |
 
-### Step 6 — why it exists (learning + safety)
+### How Step 6 (comprehension) is tracked
 
-You are very new to this stack. AI will write most of the boilerplate. **Rubber-stamping a PR you cannot explain is how secrets leak, bugs ship, and resume bullets become indefensible.**
+**GitHub Actions does not grade you.** The `Governance Steps 1–6` check:
 
-Step 6 forces a pause:
+1. Runs automated analysis (Steps 1–5)
+2. **Generates** the study guide + quiz for this PR’s diff (Step 6)
+3. Comments the report on the PR
+4. Goes ✅ green if generation succeeded and there are no blocking findings
 
-1. **Study guide** — plain-English pitch, bigger picture, glossary, key functions, dependencies, manual tasks, security notes
-2. **Quiz** — categories: vocabulary, how it works, architecture, dependencies, manual dev tasks, functions, security
-3. **Pass bar** — ≥80% on the dashboard (or `ai-guardrail quiz` locally to practice)
-4. **Only then** — Step 7 Approve / Approve & Merge unlocks
+**You prove understanding separately:**
 
-Tone: supportive teacher for a beginner, not a gotcha trap. Wrong answers show explanations so you learn.
+| Where | Command / action |
+|-------|------------------|
+| Local practice | `cd governance && ai-guardrail quiz --root .. --skip-llm` |
+| Dashboard (Step 7) | Deploy `dashboard/`, open it after CI POSTs the report → read guide → submit quiz (≥80%) → Approve & Merge unlocks |
 
-### Plan adjustments (vs original 6-step deep dive)
+Until the dashboard is deployed (`GOVERNANCE_DASHBOARD_URL` + secrets), practice with the local `quiz` command. Branch protection still requires the Actions check to be green.
 
-1. **Python-first suite** (not a separate Node CLI) — matches the gateway stack and uses stdlib `ast` instead of Babel. The dashboard remains Next.js/TS as planned.
-2. **Governance is a parallel track**, not a 5th gateway phase — it gates *all* phases including Phase 1 checkpoint work.
-3. **LLM security review is optional** — deterministic OWASP rules always run (no secret required). Set `GOVERNANCE_LLM_API_KEY` / `OPENAI_API_KEY` to enable high-reasoning diff review.
-4. **Fuzz sandbox starts as subprocess**; Docker isolation is a later hardening (same crawl→run pattern as the gateway).
-5. **Dashboard storage starts as JSON file** (`.data/reviews.json`); migrate to Supabase Postgres when Phase 3 lands (same DB target — do not invent a parallel store).
-6. **Vercel is OK for the dashboard only** — still forbidden for the streaming proxy (§8).
-7. **Bugbot + Vercel remain** — governance is additive, not a replacement.
-8. **Comprehension Gate inserted before human review** — original "Step 6 review panel" is now Step 7. Blind human review without understanding is treated as a first-class risk.
+### Agent preflight (before coding)
 
+1. Read this Ledger (§§0–2, §5, §8 at minimum).
+2. Read [`.cursor/qrspi/README.md`](.cursor/qrspi/README.md), [`AUTONOMOUS_MODE.md`](.cursor/qrspi/AUTONOMOUS_MODE.md), [`CONTEXT_ISOLATION.md`](.cursor/qrspi/CONTEXT_ISOLATION.md).
+3. Run **QRSPI** with **fresh subagents per stage** and file allowlists.
+4. Never complete `TODO: Human Hands-On Implementation` blocks.
 ### Required human setup (for the gate to actually protect `main`)
 
 See **§11 Setup Checklist** below. Require status checks:
@@ -117,7 +126,9 @@ By project end, the human must truthfully claim:
 | **THE DOER / ACHIEVER** | Composer 2.5 / Auto 2.5 | Bulk file generation, boilerplate, configurations, baseline tests, refactoring. |
 | **THE SECURITY CHIEF** | GPT-5.6 Sol | Extreme edge cases only: data scrubbing perfection, pre-flight tokenization, cryptographic verification, exhaustive security test coverage. |
 
-**Default cycle:** Grok designs → Composer builds → Grok reviews → Human fills checkpoint → validation scripts run.
+**Default cycle:** Ledger preflight → QRSPI (isolated subagents, autonomous answers) → Composer implements plan → Grok reviews → Human fills product checkpoints → governance validation.
+
+> QRSPI autonomy does **not** override Human Hands-On product checkpoints.
 
 ---
 
@@ -226,20 +237,71 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 ---
 
-## 5. Operational Protocol (Every Developmental Cycle)
+## 5. Operational Protocol — QRSPI Is Mandatory
 
-1. **Design & Plan (Grok 4.5)** — Map file modifications. Define contracts, constraints, and the human checkpoint boundary.
-2. **Boilerplate (Composer / Auto 2.5)** — Generate structural code, configs, provider adapters, baseline tests. **Never** auto-complete human checkpoint implementations.
-3. **Establish Learning Checkpoint** — Before a core feature block is finished, inject a clear:
+### 5.1 Default developmental cycle
 
-   ```text
-   TODO: Human Hands-On Implementation
-   ```
+1. **Preflight** — Read The Ledger + `.cursor/qrspi/*` (§0).
+2. **QRSPI** — Run stages 1→8 via isolated subagents (details below).
+3. **Human product checkpoint** — If the work touches a `TODO: Human Hands-On Implementation` block, stop there; do not auto-complete it. Inject/keep cheat sheets.
+4. **Governance** — Run `ai-guardrail` locally; CI must stay green; pass comprehension quiz before dashboard merge.
+5. **Validation** — After human fills a checkpoint, run tests / latency / security checks as required by phase.
 
-   block in the designated file.
-4. **Provide the Cheat Sheet** — Accompany the checkpoint with a concise **3-bullet** conceptual breakdown of *why* the underlying engineering concept works.
-5. **Human Implements** — Engineering Manager fills the checkpoint.
-6. **Security & Latency Validation** — After human completion, run validation scripts for structural security and (from Phase 2 onward) the sub-100ms processing budget.
+### 5.2 QRSPI workflow (law)
+
+Canonical playbooks: [`.cursor/qrspi/`](.cursor/qrspi/)
+
+| Stage | Playbook | Writes | Subagent inputs (ONLY) |
+|-------|----------|--------|-------------------------|
+| 1 Question | `1_question.md` | `task.md`, `questions.md` | Task / ticket + Ledger |
+| 2 Research | `2_research.md` | `research.md` | **`questions.md` only** (never `task.md`) |
+| 3 Design | `3_design.md` | `design.md` | `task.md`, `questions.md`, `research.md` |
+| 4 Structure | `4_structure.md` | `structure.md` | `design.md`, `research.md` |
+| 5 Plan | `5_plan.md` | `plan.md` | `structure.md`, `design.md`, `research.md` |
+| 6 Worktree | `6_worktree.md` | isolated branch/worktree | artifact dir + `plan.md` |
+| 7 Implement | `7_implement.md` | code + checked `plan.md` | **`plan.md` primary** |
+| 8 PR | `8_pr.md` | PR | `design.md` + diff/commits |
+
+Helper subagents: [`.cursor/qrspi/agents/`](.cursor/qrspi/agents/)
+
+Artifacts live under `thoughts/qrspi/<YYYY-MM-DD-brief-description>/`.
+
+```mermaid
+flowchart TD
+  Parent[Parent orchestrator reads Ledger] --> Q[Stage1 Question fresh subagent]
+  Q --> R[Stage2 Research fresh subagent]
+  R --> D[Stage3 Design fresh subagent]
+  D --> S[Stage4 Structure fresh subagent]
+  S --> P[Stage5 Plan fresh subagent]
+  P --> W[Stage6 Worktree or feature branch]
+  W --> I[Stage7 Implement fresh subagent]
+  I --> PR[Stage8 PR]
+```
+
+### 5.3 Autonomous Mode (no QRSPI human gates)
+
+See [`.cursor/qrspi/AUTONOMOUS_MODE.md`](.cursor/qrspi/AUTONOMOUS_MODE.md).
+
+- Original QRSPI "wait for user / approve design" steps are **disabled**.
+- The stage agent must still enumerate design options, then **pick the best answer** and record rationale.
+- **Exception:** Human Hands-On **product** checkpoints remain blocked for agents.
+
+### 5.4 Context isolation (non-negotiable)
+
+See [`.cursor/qrspi/CONTEXT_ISOLATION.md`](.cursor/qrspi/CONTEXT_ISOLATION.md).
+
+- **Fresh subagent per QRSPI stage** — do not `resume` a prior stage agent for a later stage.
+- **No shared chat history** across stages — disk artifacts are the only bridge.
+- **File allowlists** — Research must never see `task.md`.
+
+### 5.5 Learning checkpoints (product, not QRSPI)
+
+Separately from QRSPI gates, before a core pillar feature is auto-completed:
+
+1. Inject `TODO: Human Hands-On Implementation`
+2. Provide a 3-bullet cheat sheet
+3. Leave `NotImplementedError` (or equivalent) until the human implements
+4. Validate after human completion
 
 ---
 
@@ -272,6 +334,9 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 /
 ├── architecture_and_roadmap.md          # THIS FILE — The Ledger
 ├── README.md
+├── SETUP_GOVERNANCE.md
+├── .cursor/qrspi/                       # Mandatory QRSPI playbooks
+├── thoughts/qrspi/                      # Per-task QRSPI artifacts
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml                       # Gateway (Phase 1+)
@@ -323,15 +388,19 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 ## 8. Non-Negotiable Guardrails
 
 1. **No Vercel for the streaming proxy** — use Docker on Fly.io, Render, or (Phase 4) AWS ECS for long-lived async streaming.
-2. **Sub-100ms scrub budget** applies from Phase 2 onward; measure and enforce with validation scripts.
-3. **Never auto-complete human checkpoint blocks** — agents scaffold, document, and test contracts only.
-4. **Secrets only via environment variables** — never commit API keys or `.env` files.
-5. **The Ledger stays current** — update phase/checkpoint status in this file whenever status changes.
-6. **Supabase PostgreSQL** is the production database target (Phase 3); do not invent a parallel primary store.
-7. **Bugbot** is integrated for GitHub issue tracking; treat review findings as first-class work items.
-8. **Opus 4.8 and GPT-5.6 Sol** are restricted roles — do not invoke without explicit instruction.
-9. **No merge to `main` without the AI Guardrail check** once branch protection is enabled (§11). Agents must not disable or skip the workflow to land green builds.
-10. **Dashboard may use Vercel; the streaming gateway may not.**
+2. **QRSPI is mandatory** for developmental tasks — playbooks under `.cursor/qrspi/`; artifacts under `thoughts/qrspi/`.
+3. **Fresh subagent per QRSPI stage** — no shared chat history; file allowlists only; Research never reads `task.md`.
+4. **Autonomous QRSPI gates** — agents answer design/plan questions themselves; do not block on humans for QRSPI approvals.
+5. **Sub-100ms scrub budget** applies from Phase 2 onward; measure and enforce with validation scripts.
+6. **Never auto-complete human checkpoint blocks** — agents scaffold, document, and test contracts only.
+7. **Secrets only via environment variables** — never commit API keys or `.env` files.
+8. **The Ledger stays current** — update phase/checkpoint status in this file whenever status changes.
+9. **Supabase PostgreSQL** is the production database target (Phase 3); do not invent a parallel primary store.
+10. **Bugbot** findings are first-class work items.
+11. **Opus 4.8 and GPT-5.6 Sol** are restricted roles — do not invoke without explicit instruction.
+12. **No merge to `main` without the `Governance Steps 1–6` check** (§11). Agents must not disable the workflow.
+13. **Dashboard may use Vercel; the streaming gateway may not.**
+14. **Comprehension quiz must be passed** (dashboard or local practice + honest understanding) before treating a PR as human-reviewed.
 
 ---
 

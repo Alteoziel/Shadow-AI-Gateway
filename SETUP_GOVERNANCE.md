@@ -61,7 +61,7 @@ Then add Actions secrets:
 | `GOVERNANCE_DASHBOARD_URL` | e.g. `https://your-app.vercel.app` |
 | `GOVERNANCE_DASHBOARD_SECRET` | Same string as the dashboard |
 
-## 5. Local dry-run anytime
+## Local dry-run anytime
 
 ```bash
 cd governance
@@ -69,9 +69,10 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ai-guardrail run --root .. --skip-llm
-ai-guardrail quiz --root .. --skip-llm    # practice the comprehension gate
+ai-guardrail quiz --root .. --skip-llm    # YOUR comprehension test (graded here / on dashboard, not inside Actions)
 ```
 
+**Important:** The GitHub check `Governance Steps 1–6` proves the suite ran and generated a quiz. It does **not** mark that *you* passed. Pass locally with `ai-guardrail quiz`, or on the Step 7 dashboard after you deploy it.
 ## 6. How a PR flows after setup
 
 ```text
