@@ -106,4 +106,4 @@ Write matching draft text with summary, tests, Ledger/QRSPI references, and expl
 
 #### Manual
 - [x] PR draft exists in both requested locations. autonomous: verified with `wc -l .pr-drafts/agent7.md /tmp/pr-drafts/agent7.md /workspace/.pr-drafts/agent7.md`.
-- [ ] Branch pushed to `origin cursor/gov-copyright-quiz-packs-5e0d`. autonomous: verify with `git rev-parse HEAD` and `git push`.
+- [x] Branch pushed to `origin cursor/gov-copyright-quiz-packs-5e0d`. autonomous: verified with `git push -u origin HEAD:cursor/gov-copyright-quiz-packs-5e0d`; pushed SHA before this artifact update was `8dd8c86ec2b53c1671983a812c94d4c91a8cf855`.
