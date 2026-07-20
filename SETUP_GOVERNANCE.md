@@ -2,6 +2,20 @@
 
 The seven-step suite is in the repo. **It will not protect `main` until you finish these setup steps.** Right now you only have Vercel deploy checks + Cursor Bugbot; those stay, and this gate is additive.
 
+## Mental model (read this first)
+
+| Thing | Where it runs | What you do with it |
+|-------|---------------|---------------------|
+| **Governance Steps 1–6** | GitHub Actions (`AI Code Guardrail` workflow) | Generates the study guide + quiz on every PR |
+| **Step 7 Review Dashboard** | **Vercel** (`dashboard/` Next.js app) | Where you **read the guide and take the quiz** |
+| Shadow AI Gateway (FastAPI) | Fly / Render — **not Vercel** | Unrelated to the quiz UI |
+
+You cannot take the UI quiz from the Actions log alone. CI builds the quiz, then POSTs it to the dashboard. No dashboard URL → empty UI.
+
+> **Important:** Your GitHub repo currently shows Vercel checks for `sellable-saas-template` / `sellable-saa-s-template`. Those are the **wrong** projects. Create a **new** Vercel project pointed at `dashboard/` (steps below).
+
+---
+
 ## 1. Merge this PR (and the architecture ledger PR if still open)
 
 Bring `governance/`, `.github/workflows/ai-guardrail.yml`, and `dashboard/` onto `main`.
@@ -32,34 +46,89 @@ Without this:
 
 With this: both get smarter, diff-aware questions/explanations.
 
-## 4. Deploy the Step 7 dashboard
+## 4. Deploy the Step 7 dashboard to Vercel (so you can take quizzes)
+
+### 4a. Create a secret you will reuse
+
+Pick a long random string (password manager / `openssl rand -hex 32`). You will paste it in **three** places:
+
+1. Vercel env → `GOVERNANCE_DASHBOARD_SECRET`
+2. GitHub Actions secret → `GOVERNANCE_DASHBOARD_SECRET` (same value)
+3. Browser “Unlock actions” prompt when you take the quiz
+
+### 4b. Create a new Vercel project for the dashboard
+
+1. Open [vercel.com/new](https://vercel.com/new)
+2. **Import** `Alteoziel/Shadow-AI-Gateway` (your GitHub repo)
+3. Project name: e.g. `shadow-ai-governance` (anything except the old sellable-saas templates)
+4. **Root Directory** → click Edit → set to **`dashboard`** → Continue
+5. Framework Preset should detect **Next.js**
+6. Do **not** deploy yet — first add env + Redis (next steps), or deploy then add and redeploy
+
+### 4c. Add Upstash Redis (required on Vercel)
+
+The quiz store cannot use a local JSON file on serverless (each request may hit a different machine). Use Upstash:
+
+1. Vercel project → **Storage** → **Create** → **Upstash Redis** (Marketplace)
+2. Connect it to this project — Vercel injects:
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
+3. Redeploy after connecting
+
+### 4d. Set dashboard environment variables
+
+Vercel project → **Settings → Environment Variables** (Production + Preview):
+
+| Env | Value |
+|-----|-------|
+| `GOVERNANCE_DASHBOARD_SECRET` | The secret from 4a |
+| `GOVERNANCE_REVIEWER_SECRET` | Optional; defaults to dashboard secret |
+| `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | Fine-grained PAT with `contents:write` + `pull-requests:write` (only needed for **Approve & Merge**) |
+| `UPSTASH_REDIS_REST_URL` | Auto from Marketplace (verify present) |
+| `UPSTASH_REDIS_REST_TOKEN` | Auto from Marketplace (verify present) |
+
+Then **Deploy** (Deployments → Redeploy, or push a commit).
+
+Copy your production URL, e.g. `https://shadow-ai-governance.vercel.app`.
+
+### 4e. Wire GitHub Actions → dashboard
+
+GitHub repo → **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+|--------|-------|
+| `GOVERNANCE_DASHBOARD_URL` | `https://your-dashboard.vercel.app` (no trailing slash) |
+| `GOVERNANCE_DASHBOARD_SECRET` | **Same** string as Vercel |
+
+### 4f. Take a quiz (end-to-end)
+
+1. Open (or create) a PR into `main`
+2. Wait for the **Governance Steps 1–6** check to finish
+3. Open your Vercel dashboard URL
+4. You should see the PR review with status **quiz pending**
+5. Click **Unlock actions** → paste the shared secret
+6. Read the study guide → take the quiz (≥80%) → Approve / Merge unlocks
+
+If the list is empty: CI could not POST (wrong URL/secret), or Redis is missing. Check the Actions log for dashboard POST soft-fail messages, and the Vercel function logs for Redis errors.
+
+### Local alternative (no Vercel)
 
 ```bash
 cd dashboard
 npm install
 cp .env.example .env.local
-# edit .env.local
-npm run dev          # local
-# or deploy to Vercel (OK for the dashboard — NOT for the streaming gateway)
+# set GOVERNANCE_DASHBOARD_SECRET=... and GOVERNANCE_ALLOW_INSECURE_DEV=true
+npm run dev          # http://localhost:3000
 ```
 
-Set on the dashboard host:
+Practice the quiz without the UI:
 
-| Env | Purpose |
-|-----|---------|
-| `GOVERNANCE_DASHBOARD_SECRET` | **Required** shared secret for CI ingest + reviewer actions |
-| `GOVERNANCE_REVIEWER_SECRET` | Optional override for quiz/approve/merge (defaults to dashboard secret) |
-| `GOVERNANCE_ALLOW_INSECURE_DEV` | Local only (`true`); ignored in production |
-| `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | Fine-grained PAT with `contents:write` + `pull-requests:write` for **Approve & Merge** |
-
-On the dashboard UI, click **Unlock actions** and paste the same secret once per browser session.
-
-Then add Actions secrets:
-
-| Secret | Value |
-|--------|-------|
-| `GOVERNANCE_DASHBOARD_URL` | e.g. `https://your-app.vercel.app` |
-| `GOVERNANCE_DASHBOARD_SECRET` | Same string as the dashboard |
+```bash
+cd governance
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+ai-guardrail quiz --root .. --skip-llm
+```
 
 ## Local dry-run anytime
 
@@ -77,7 +146,7 @@ ai-guardrail quiz --root .. --skip-llm    # YOUR comprehension test (graded here
 
 ```text
 Open PR → main
-   ├─ Vercel check (dashboard deploys, if linked)
+   ├─ Vercel check (dashboard deploys, if linked correctly)
    ├─ Cursor Bugbot (review comments)
    └─ AI Code Guardrail workflow
         ├─ Steps 1–5: automated analysis
@@ -99,6 +168,6 @@ You are new to this. AI will write a lot of the code. Clicking “looks good” 
 |-------|--------------|-----|
 | Shadow AI Gateway (FastAPI proxy) | Fly / Render / later AWS ECS — **not Vercel** | Intercept LLM traffic |
 | Governance CLI | GitHub Actions + local | Analyze code + generate quiz |
-| Review dashboard | Vercel or any Node host | Quiz + human approve/merge UI |
+| Review dashboard | Vercel (+ Upstash Redis) | Quiz + human approve/merge UI |
 
 Full detail: `architecture_and_roadmap.md` §0 and §11.
