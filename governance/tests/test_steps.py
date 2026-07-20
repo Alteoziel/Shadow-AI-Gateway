@@ -130,12 +130,13 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
     assert result.passed
     pack = result.metrics["comprehension"]
     assert pack["pass_threshold"] == 0.8
-    assert len(pack["questions"]) >= 12
-    coding = [q for q in pack["questions"] if q["category"] == "coding_problem"]
-    assert len(coding) == 2
-    assert coding[0]["id"].startswith("code_q11")
-    assert coding[1]["id"].startswith("code_q12")
-    assert "```python" in coding[0]["prompt"]
+    coding = [q for q in pack["questions"] if q.get("question_type") == "coding"]
+    assert len(coding) >= 2
+    for q in coding:
+        assert q["entrypoint"]
+        assert q["starter_code"]
+        assert q["tests"]
+        assert q["language"] == "javascript"
     assert pack["study_guide"]["glossary"]
     assert pack["study_guide"]["manual_dev_tasks"]
 

@@ -69,7 +69,15 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
     const answers = (body.answers ?? {}) as Record<string, number>;
-    const attempt = gradeComprehension(review.comprehension, answers);
+    const codingSubmissions = (body.coding_submissions ?? {}) as Record<
+      string,
+      string
+    >;
+    const attempt = gradeComprehension(
+      review.comprehension,
+      answers,
+      codingSubmissions
+    );
     const updated = await updateReview(id, {
       comprehension_passed: attempt.passed,
       comprehension_attempt: attempt,
@@ -88,11 +96,22 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
 
     // Teach with explanations, but never leak expected_index (anti-cheat)
-    const explanations = review.comprehension.questions.map((q) => ({
-      id: q.id,
-      correct: answers[q.id] === q.answer_index,
-      explanation: q.explanation,
-    }));
+    const explanations = review.comprehension.questions.map((q) => {
+      if (q.question_type === "coding") {
+        const c = attempt.coding?.[q.id];
+        return {
+          id: q.id,
+          correct: Boolean(c?.passed),
+          explanation: q.explanation,
+          coding: c ?? null,
+        };
+      }
+      return {
+        id: q.id,
+        correct: answers[q.id] === q.answer_index,
+        explanation: q.explanation,
+      };
+    });
 
     return NextResponse.json({
       review: updated ? sanitizeReviewForClient(updated) : null,

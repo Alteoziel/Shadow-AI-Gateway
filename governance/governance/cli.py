@@ -216,16 +216,26 @@ def quiz(
         f"\n[bold]Quiz[/bold] — need ≥ {int(pack['pass_threshold'] * 100)}% to pass\n"
     )
     answers: dict[str, int] = {}
-    for i, q in enumerate(pack["questions"], 1):
+    mc_questions = [q for q in pack["questions"] if q.get("question_type") != "coding"]
+    coding_n = len(pack["questions"]) - len(mc_questions)
+    if coding_n:
+        console.print(
+            f"\n[yellow]{coding_n} coding challenge(s) need the dashboard mini-editor "
+            "— skipped in this CLI practice session.[/yellow]"
+        )
+    for i, q in enumerate(mc_questions, 1):
         console.print(
             f"\n[magenta]{i}. [{q.get('category_label', q['category'])}][/magenta] {q['prompt']}"
         )
         for idx, choice in enumerate(q["choices"]):
             console.print(f"   {idx}) {choice}")
-        pick = IntPrompt.ask("Your answer", choices=[str(x) for x in range(len(q["choices"]))])
+        pick = IntPrompt.ask(
+            "Your answer", choices=[str(x) for x in range(len(q["choices"]))]
+        )
         answers[q["id"]] = int(pick)
 
-    graded = comprehension_gate.grade(pack, answers)
+    practice_pack = {**pack, "questions": mc_questions}
+    graded = comprehension_gate.grade(practice_pack, answers)
     console.print()
     if graded["passed"]:
         console.print(

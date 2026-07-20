@@ -11,6 +11,11 @@ import {
   YAxis,
 } from "recharts";
 import type { Review, StepResult } from "@/lib/store";
+import { MiniCodeEditor } from "@/components/MiniCodeEditor";
+import {
+  gradeCodingSubmissionBrowser,
+  type CodingGradeResult,
+} from "@/lib/codingGradeBrowser";
 
 /**
  * Keep the reviewer secret in process memory only — never sessionStorage /
@@ -157,6 +162,22 @@ type PublicQuestion = {
   prompt: string;
   choices: string[];
   format?: "text" | "code";
+  question_type?: string;
+  language?: string;
+  starter_code?: string;
+  entrypoint?: string;
+  tests?: {
+    id?: string;
+    args: unknown[];
+    expected?: unknown;
+    raises?: string;
+  }[];
+};
+
+type CodingDraft = {
+  code: string;
+  result: CodingGradeResult | null;
+  running: boolean;
 };
 
 function renderQuizPrompt(prompt: string) {
@@ -226,17 +247,70 @@ function ReviewerUnlock() {
 function ComprehensionPanel({ review }: { review: Review }) {
   const pack = review.comprehension;
   const questions = (pack?.questions ?? []) as PublicQuestion[];
+  const codingQuestions = useMemo(
+    () => questions.filter((q) => q.question_type === "coding"),
+    [questions]
+  );
+  const mcQuestions = useMemo(
+    () => questions.filter((q) => q.question_type !== "coding"),
+    [questions]
+  );
   const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [codingDrafts, setCodingDrafts] = useState<Record<string, CodingDraft>>(
+    () => {
+      const initial: Record<string, CodingDraft> = {};
+      for (const q of questions) {
+        if (q.question_type === "coding") {
+          initial[q.id] = {
+            code: q.starter_code || "",
+            result: null,
+            running: false,
+          };
+        }
+      }
+      return initial;
+    }
+  );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [explanations, setExplanations] = useState<
-    { id: string; correct: boolean; explanation: string }[] | null
+    {
+      id: string;
+      correct: boolean;
+      explanation: string;
+      coding?: CodingGradeResult | null;
+    }[] | null
   >(null);
 
-  const allAnswered = useMemo(
-    () => questions.length > 0 && questions.every((q) => answers[q.id] !== undefined),
-    [answers, questions]
+  const allMcAnswered = useMemo(
+    () => mcQuestions.every((q) => answers[q.id] !== undefined),
+    [answers, mcQuestions]
   );
+  const allCodingPassed = useMemo(
+    () =>
+      codingQuestions.every((q) => codingDrafts[q.id]?.result?.passed === true),
+    [codingDrafts, codingQuestions]
+  );
+  const canSubmit =
+    questions.length > 0 && allMcAnswered && allCodingPassed && !busy;
+
+  function runCodingTests(q: PublicQuestion) {
+    if (!q.entrypoint || !q.tests?.length) return;
+    const draft = codingDrafts[q.id];
+    const code = draft?.code ?? q.starter_code ?? "";
+    setCodingDrafts((prev) => ({
+      ...prev,
+      [q.id]: { code, result: prev[q.id]?.result ?? null, running: true },
+    }));
+    const result = gradeCodingSubmissionBrowser(
+      { id: q.id, entrypoint: q.entrypoint, tests: q.tests },
+      code
+    );
+    setCodingDrafts((prev) => ({
+      ...prev,
+      [q.id]: { code, result, running: false },
+    }));
+  }
 
   if (!pack) {
     return (
@@ -274,10 +348,20 @@ function ComprehensionPanel({ review }: { review: Review }) {
     setBusy(true);
     setMessage(null);
     try {
+      const coding_submissions = Object.fromEntries(
+        codingQuestions.map((q) => [
+          q.id,
+          codingDrafts[q.id]?.code ?? q.starter_code ?? "",
+        ])
+      );
       const res = await fetch(`/api/reviews/${review.id}`, {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ action: "submit_quiz", answers }),
+        body: JSON.stringify({
+          action: "submit_quiz",
+          answers,
+          coding_submissions,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -380,59 +464,122 @@ function ComprehensionPanel({ review }: { review: Review }) {
 
       <div className="mt-8 space-y-6 border-t border-white/10 pt-6">
         <h4 className="font-display text-xl text-white">Quiz</h4>
-        {questions.map((q, i) => (
-          <fieldset key={q.id} className="space-y-2">
-            <legend className="text-sm text-white">
-              <span className="text-mist">
-                {i + 1}. [{q.category_label || q.category}]
-              </span>{" "}
-              <span className="mt-1 block whitespace-pre-wrap">
-                {renderQuizPrompt(q.prompt)}
-              </span>
-            </legend>            <div className="space-y-1">
-              {q.choices.map((choice, idx) => (
-                <label
-                  key={idx}
-                  className={`flex cursor-pointer gap-2 rounded-md px-3 py-2 text-sm ${
-                    answers[q.id] === idx
-                      ? "bg-signal/20 text-white"
-                      : "bg-black/25 text-white/85"
+        <p className="text-sm text-mist">
+          Multiple-choice questions plus short coding challenges in a mini editor.
+          Run the tests on each challenge until they pass, then submit.
+        </p>
+        {questions.map((q, i) => {
+          const isCoding = q.question_type === "coding";
+          const draft = codingDrafts[q.id] ?? {
+            code: q.starter_code || "",
+            result: null,
+            running: false,
+          };
+          const explanation = explanations?.find((e) => e.id === q.id);
+          return (
+            <fieldset key={q.id} className="space-y-2">
+              <legend className="text-sm text-white">
+                <span className="text-mist">
+                  {i + 1}. [{q.category_label || q.category}]
+                  {isCoding ? " · write code" : ""}
+                </span>{" "}
+                <span className="mt-1 block whitespace-pre-wrap">
+                  {renderQuizPrompt(q.prompt)}
+                </span>
+              </legend>
+              {isCoding ? (
+                <div className="space-y-2">
+                  <MiniCodeEditor
+                    value={draft.code}
+                    running={draft.running}
+                    onChange={(code) =>
+                      setCodingDrafts((prev) => ({
+                        ...prev,
+                        [q.id]: { code, result: null, running: false },
+                      }))
+                    }
+                    onReset={() =>
+                      setCodingDrafts((prev) => ({
+                        ...prev,
+                        [q.id]: {
+                          code: q.starter_code || "",
+                          result: null,
+                          running: false,
+                        },
+                      }))
+                    }
+                    onRun={() => runCodingTests(q)}
+                  />
+                  {draft.result ? (
+                    <p
+                      className={`text-xs ${
+                        draft.result.passed ? "text-signal" : "text-alert"
+                      }`}
+                    >
+                      {draft.result.passed
+                        ? `All ${draft.result.totalTests} tests passed.`
+                        : `${draft.result.passedTests}/${draft.result.totalTests} tests passed. ${draft.result.errors[0] ?? ""}`}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-mist">
+                      Click “Run tests” — all must pass before you can submit.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {q.choices.map((choice, idx) => (
+                    <label
+                      key={idx}
+                      className={`flex cursor-pointer gap-2 rounded-md px-3 py-2 text-sm ${
+                        answers[q.id] === idx
+                          ? "bg-signal/20 text-white"
+                          : "bg-black/25 text-white/85"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        className="mt-1"
+                        name={q.id}
+                        checked={answers[q.id] === idx}
+                        onChange={() =>
+                          setAnswers((prev) => ({ ...prev, [q.id]: idx }))
+                        }
+                      />
+                      <span>{choice}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {explanation ? (
+                <p
+                  className={`text-xs ${
+                    explanation.correct ? "text-signal" : "text-alert"
                   }`}
                 >
-                  <input
-                    type="radio"
-                    className="mt-1"
-                    name={q.id}
-                    checked={answers[q.id] === idx}
-                    onChange={() =>
-                      setAnswers((prev) => ({ ...prev, [q.id]: idx }))
-                    }
-                  />
-                  <span>{choice}</span>
-                </label>
-              ))}
-            </div>
-            {explanations?.find((e) => e.id === q.id) ? (
-              <p
-                className={`text-xs ${
-                  explanations.find((e) => e.id === q.id)?.correct
-                    ? "text-signal"
-                    : "text-alert"
-                }`}
-              >
-                {explanations.find((e) => e.id === q.id)?.explanation}
-              </p>
-            ) : null}
-          </fieldset>
-        ))}
+                  {explanation.explanation}
+                  {explanation.coding && !explanation.coding.passed
+                    ? ` (${explanation.coding.errors[0] ?? "tests failed"})`
+                    : ""}
+                </p>
+              ) : null}
+            </fieldset>
+          );
+        })}
 
         <button
           type="button"
-          disabled={!allAnswered || busy}
+          disabled={!canSubmit}
           onClick={submit}
           className="rounded-md bg-warn px-4 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {busy ? "Grading…" : "Submit comprehension quiz"}
+          {busy
+            ? "Grading…"
+            : !allCodingPassed
+              ? "Pass all coding challenges first"
+              : !allMcAnswered
+                ? "Answer all multiple-choice questions"
+                : "Submit comprehension quiz"}
         </button>
         {message ? <p className="text-sm text-alert">{message}</p> : null}
       </div>

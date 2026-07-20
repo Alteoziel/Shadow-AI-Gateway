@@ -406,194 +406,270 @@ def _extract_python_snippets(
     return snippets
 
 
+def _coding_challenge(
+    *,
+    qid: str,
+    prompt: str,
+    starter_code: str,
+    entrypoint: str,
+    tests: list[dict[str, Any]],
+    explanation: str,
+) -> dict[str, Any]:
+    """Interactive coding challenge (write code in the dashboard editor)."""
+    return {
+        "id": qid,
+        "question_type": "coding",
+        "category": "coding_problem",
+        "category_label": CATEGORY_LABELS["coding_problem"],
+        "prompt": prompt,
+        "language": "javascript",
+        "starter_code": starter_code,
+        "entrypoint": entrypoint,
+        "tests": tests,
+        "choices": [],
+        "answer_index": -1,
+        "explanation": explanation,
+        "format": "code",
+    }
+
+
 def _make_coding_questions(
     paths: list[Path],
     *,
     root: Path | None,
     all_fns: list[tuple[str, dict]],
 ) -> list[dict[str, Any]]:
-    """Always emit two coding problems tied to this PR's code when possible."""
-    snippets = _extract_python_snippets(paths, root=root)
-    # Prefer non-dunder, non-tiny test-looking names first
-    snippets_sorted = sorted(
-        snippets,
-        key=lambda s: (
-            s["name"].startswith("test_"),
-            s["name"].startswith("_"),
-            len(s["source"]),
-        ),
-    )
+    """Emit ≥2 short coding challenges the learner must solve in an editor.
 
+    Challenges are JavaScript so the dashboard can run/grade them safely in the
+    browser and again on the server (node:vm). Prompts are tied to this PR's
+    files/concepts when possible.
+    """
+    rels = [_rel(p, root).replace("\\", "/") for p in paths if p.is_file()]
+    joined = " ".join(rels).lower()
+    snippets = _extract_python_snippets(paths, root=root)
     questions: list[dict[str, Any]] = []
 
-    # --- Q11: read real code from the PR and reason about behavior ---
-    if snippets_sorted:
-        snip = snippets_sorted[0]
-        code_block = f"```python\n{snip['source']}\n```"
-        if snip["returns"]:
-            correct = (
-                f"It returns `{snip['returns'][0]}` "
-                f"(see the `return` in `{snip['name']}`)."
-            )
-            wrongs = [
-                "It never returns — Python functions cannot return values.",
-                f"It always raises `NotImplementedError` before returning.",
-                f"It returns the string literal `\"{snip['name']}\"` and nothing else.",
-            ]
-            explanation = (
-                f"`{snip['name']}` in `{snip['file']}` returns `{snip['returns'][0]}`. "
-                "Open that file in the PR and trace the return path."
-            )
-        elif snip["doc"]:
-            correct = (
-                f"It implements: {snip['doc'][:120]} "
-                f"(documented on `{snip['name']}`)."
-            )
-            wrongs = [
-                "It is only a CSS animation helper with no Python logic.",
-                "It deletes the git repository when called.",
-                "It is an unused import alias and cannot be invoked.",
-            ]
-            explanation = (
-                f"Read the docstring/body of `{snip['name']}` in `{snip['file']}` "
-                "from this PR — that is what you must be able to explain."
-            )
-        else:
-            arg_list = ", ".join(snip["args"]) or "no arguments"
-            correct = (
-                f"It is a{'n async' if snip['async'] else ''} function "
-                f"`{snip['name']}({arg_list})` defined in this PR — you must be "
-                "able to walk through its body."
-            )
-            wrongs = [
-                "It is a Markdown heading, not executable code.",
-                "It is generated at runtime by Terraform only.",
-                "It lives only in the GitHub Actions cache, not in the repo.",
-            ]
-            explanation = (
-                f"Open `{snip['file']}` and explain `{snip['name']}` line by line."
-            )
+    # --- Challenge pool (pick PR-relevant ones first) ---
+    pool: list[dict[str, Any]] = []
 
-        choices = [correct, *wrongs]
-        # Keep correct at a stable but non-zero index so it's not always first
-        answer_index = 1
-        ordered = [choices[1], choices[0], choices[2], choices[3]]
-        questions.append(
-            _q(
-                "code_q11_trace_pr_fn",
-                "coding_problem",
-                (
-                    f"**Coding problem 1 — from this PR (`{snip['file']}`).**\n\n"
-                    f"Read this function and choose the statement that matches the code:\n\n"
-                    f"{code_block}"
+    if any("github" in r for r in rels) or "quiz" in joined or "governance" in joined:
+        pool.append(
+            _coding_challenge(
+                qid="code_ch_parse_repo",
+                prompt=(
+                    "**Coding challenge — GitHub repo ref (this PR’s governance check).**\n\n"
+                    "Implement `parseOwnerRepo(repo)`.\n"
+                    "- Input is a string like `\"Alteoziel/Shadow-AI-Gateway\"`.\n"
+                    "- If valid `owner/name` (letters, numbers, `_`, `.`, `-`), "
+                    "return `{ owner, name, full }` where `full` is `owner/name`.\n"
+                    "- Otherwise return `null`.\n"
+                    "- Trim whitespace. Reject empty parts or extra `/` segments."
                 ),
-                ordered,
-                answer_index,
-                explanation,
-                format="code",
-            )
-        )
-    else:
-        # Fallback still framed as a coding exercise (gateway-shaped)
-        questions.append(
-            _q(
-                "code_q11_fallback_interceptor",
-                "coding_problem",
-                (
-                    "**Coding problem 1.** Given this scaffold from the gateway pattern:\n\n"
-                    "```python\n"
-                    "async def intercept_outbound_request(body: dict) -> dict:\n"
-                    "    # Human checkpoint — implement pre-flight checks here\n"
-                    "    raise RuntimeError('interceptor not wired')\n"
-                    "```\n\n"
-                    "What must a correct implementation do before any provider call?"
+                starter_code=(
+                    "function parseOwnerRepo(repo) {\n"
+                    "  // TODO: implement\n"
+                    "}\n"
                 ),
-                [
-                    "Call OpenAI first, then validate the response body only.",
-                    "Validate/normalize the outbound request pre-flight, then allow the provider adapter to run.",
-                    "Write the API key into the repo so adapters can import it.",
-                    "Skip validation when `body` contains the key `\"stream\": true`.",
+                entrypoint="parseOwnerRepo",
+                tests=[
+                    {
+                        "id": "t1",
+                        "args": ["Alteoziel/Shadow-AI-Gateway"],
+                        "expected": {
+                            "owner": "Alteoziel",
+                            "name": "Shadow-AI-Gateway",
+                            "full": "Alteoziel/Shadow-AI-Gateway",
+                        },
+                    },
+                    {"id": "t2", "args": ["  a/b  "], "expected": {"owner": "a", "name": "b", "full": "a/b"}},
+                    {"id": "t3", "args": ["nope"], "expected": None},
+                    {"id": "t4", "args": ["a/b/c"], "expected": None},
+                    {"id": "t5", "args": [""], "expected": None},
                 ],
-                1,
-                "Checkpoint #1 is pre-flight validation in the interceptor — before upstream I/O.",
-                format="code",
+                explanation=(
+                    "Same rules as `parseGithubRepo` in the dashboard — validate before "
+                    "building GitHub API URLs."
+                ),
             )
         )
 
-    # --- Q12: predict output / pick the correct fix for PR code ---
-    if len(snippets_sorted) >= 2:
-        snip = snippets_sorted[1]
-    elif snippets_sorted:
-        snip = snippets_sorted[0]
-    else:
-        snip = None
+    pool.append(
+        _coding_challenge(
+            qid="code_ch_quiz_score",
+            prompt=(
+                "**Coding challenge — comprehension scoring.**\n\n"
+                "Implement `quizPassed(correct, total, threshold)`.\n"
+                "- `correct` and `total` are non-negative integers; `threshold` is 0–1 "
+                "(e.g. `0.8`).\n"
+                "- Return `true` iff `total > 0` and `(correct / total) >= threshold`.\n"
+                "- If `total === 0`, return `false`."
+            ),
+            starter_code=(
+                "function quizPassed(correct, total, threshold) {\n"
+                "  // TODO: implement\n"
+                "}\n"
+            ),
+            entrypoint="quizPassed",
+            tests=[
+                {"id": "t1", "args": [8, 10, 0.8], "expected": True},
+                {"id": "t2", "args": [7, 10, 0.8], "expected": False},
+                {"id": "t3", "args": [0, 0, 0.8], "expected": False},
+                {"id": "t4", "args": [4, 5, 0.8], "expected": True},
+                {"id": "t5", "args": [1, 2, 0.5], "expected": True},
+            ],
+            explanation="Matches the dashboard Step 6 pass rule (≥ threshold).",
+        )
+    )
 
-    if snip is not None:
-        code_block = f"```python\n{snip['source']}\n```"
-        # Build a "which edit is correct" style problem
-        correct = (
-            f"Keep `{snip['name']}`'s control flow as in the PR and be able to "
-            f"explain each branch/return in `{snip['file']}`."
+    pool.append(
+        _coding_challenge(
+            qid="code_ch_normalize_messages",
+            prompt=(
+                "**Coding challenge — gateway request shape.**\n\n"
+                "Implement `normalizeMessages(body)` for chat payloads:\n"
+                "- Read `body.messages`.\n"
+                "- If missing/undefined/null, treat as `[]`.\n"
+                "- If it is not an array, throw `Error` with message "
+                "`messages must be a list`.\n"
+                "- Otherwise return a **new** object: all keys from `body`, with "
+                "`messages` set to that array (do not mutate the input)."
+            ),
+            starter_code=(
+                "function normalizeMessages(body) {\n"
+                "  // TODO: implement\n"
+                "}\n"
+            ),
+            entrypoint="normalizeMessages",
+            tests=[
+                {
+                    "id": "t1",
+                    "args": [{"model": "x", "messages": [{"role": "user"}]}],
+                    "expected": {"model": "x", "messages": [{"role": "user"}]},
+                },
+                {
+                    "id": "t2",
+                    "args": [{"model": "x"}],
+                    "expected": {"model": "x", "messages": []},
+                },
+                {
+                    "id": "t3",
+                    "args": [{"messages": "oops"}],
+                    "raises": "Error",
+                },
+            ],
+            explanation=(
+                "Same pre-flight discipline as the gateway interceptor — validate "
+                "before upstream calls."
+            ),
         )
-        distractors = [
-            f"Delete `{snip['name']}` entirely; CI does not need real functions.",
-            f"Replace `{snip['name']}` with `eval(user_input)` for flexibility.",
-            f"Copy `{snip['name']}` into the README as a screenshot only — no code review needed.",
-        ]
-        ordered = [distractors[0], distractors[1], correct, distractors[2]]
-        questions.append(
-            _q(
-                "code_q12_fix_or_explain",
-                "coding_problem",
-                (
-                    f"**Coding problem 2 — debug/own this PR code (`{snip['file']}`).**\n\n"
-                    f"You are reviewing `{snip['name']}`. Which action is the correct "
-                    f"engineering response before merge?\n\n{code_block}"
-                ),
-                ordered,
-                2,
-                (
-                    f"You must understand and stand behind `{snip['name']}` in "
-                    f"`{snip['file']}`. Deleting it, using eval, or skipping review "
-                    "are not acceptable merge paths."
-                ),
-                format="code",
-            )
+    )
+
+    pool.append(
+        _coding_challenge(
+            qid="code_ch_quiz_status",
+            prompt=(
+                "**Coding challenge — Governance Quiz commit status.**\n\n"
+                "Implement `quizCommitState(comprehensionPassed)` used when CI/dashboard "
+                "updates the GitHub check:\n"
+                "- If `comprehensionPassed` is strictly `true`, return `\"success\"`.\n"
+                "- Otherwise return `\"pending\"`."
+            ),
+            starter_code=(
+                "function quizCommitState(comprehensionPassed) {\n"
+                "  // TODO: implement\n"
+                "}\n"
+            ),
+            entrypoint="quizCommitState",
+            tests=[
+                {"id": "t1", "args": [True], "expected": "success"},
+                {"id": "t2", "args": [False], "expected": "pending"},
+                {"id": "t3", "args": [None], "expected": "pending"},
+            ],
+            explanation="CI opens the check as pending; a passed quiz flips it to success.",
         )
-    else:
-        fn_hint = all_fns[0][1]["name"] if all_fns else "handle_request"
-        questions.append(
-            _q(
-                "code_q12_fallback_trace",
-                "coding_problem",
-                (
-                    "**Coding problem 2.** Trace this Python:\n\n"
-                    "```python\n"
-                    "def normalize(body: dict) -> dict:\n"
-                    "    messages = body.get(\"messages\") or []\n"
-                    "    if not isinstance(messages, list):\n"
-                    "        raise ValueError(\"messages must be a list\")\n"
-                    "    return {**body, \"messages\": messages}\n"
-                    "\n"
-                    "normalize({\"messages\": \"oops\"})\n"
-                    "```\n\n"
-                    "What happens?"
+    )
+
+    if any("ast" in r or "comprehension" in r for r in rels) or snippets:
+        pool.append(
+            _coding_challenge(
+                qid="code_ch_max_nest",
+                prompt=(
+                    "**Coding challenge — AST nested-loop depth.**\n\n"
+                    "Implement `maxNestDepth(depths)` where `depths` is an array of "
+                    "integers (loop nesting at various points).\n"
+                    "- Return the maximum value in the array.\n"
+                    "- If the array is empty, return `0`.\n\n"
+                    f"This PR’s governance AST rule fails when depth exceeds 2"
+                    + (
+                        f" — related files include `{snippets[0]['file']}`."
+                        if snippets
+                        else "."
+                    )
                 ),
-                [
-                    "Returns `{\"messages\": \"oops\"}` unchanged.",
-                    "Raises `ValueError` because `messages` is not a list.",
-                    "Calls OpenAI and returns a streaming response.",
-                    "Writes a row to Postgres and returns `None`.",
+                starter_code=(
+                    "function maxNestDepth(depths) {\n"
+                    "  // TODO: implement\n"
+                    "}\n"
+                ),
+                entrypoint="maxNestDepth",
+                tests=[
+                    {"id": "t1", "args": [[1, 2, 3, 2]], "expected": 3},
+                    {"id": "t2", "args": [[]], "expected": 0},
+                    {"id": "t3", "args": [[1]], "expected": 1},
+                    {"id": "t4", "args": [[2, 2, 1]], "expected": 2},
                 ],
-                1,
-                "The guard checks `isinstance(messages, list)` before continuing — "
-                f"same discipline you need when reading `{fn_hint}` in this PR.",
-                format="code",
+                explanation="AST001 blocks merge when nested loop depth > 2.",
             )
         )
 
-    assert len(questions) == 2
-    return questions
+    # Prefer challenges whose ids mention themes present in the PR; keep unique order
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _take(qid: str) -> None:
+        for q in pool:
+            if q["id"] == qid and qid not in seen:
+                selected.append(q)
+                seen.add(qid)
+                return
+
+    if any("github" in r for r in rels):
+        _take("code_ch_parse_repo")
+    if "quiz" in joined or "comprehension" in joined or "governance" in joined:
+        _take("code_ch_quiz_score")
+        _take("code_ch_quiz_status")
+    if any("proxy" in r or "interceptor" in r or "gateway" in r for r in rels):
+        _take("code_ch_normalize_messages")
+    if snippets or any("ast" in r or "comprehension" in r for r in rels):
+        _take("code_ch_max_nest")
+
+    for q in pool:
+        if len(selected) >= 2:
+            break
+        if q["id"] not in seen:
+            selected.append(q)
+            seen.add(q["id"])
+
+    # Always at least 2; if pool somehow tiny, duplicate-safe fill already handled
+    while len(selected) < 2 and pool:
+        for q in pool:
+            if q["id"] not in seen:
+                selected.append(q)
+                seen.add(q["id"])
+            if len(selected) >= 2:
+                break
+        break
+
+    # If PR is large, offer a third challenge when we have extras
+    if len(seen) < len(pool) and len(selected) == 2:
+        for q in pool:
+            if q["id"] not in seen:
+                selected.append(q)
+                break
+
+    assert len(selected) >= 2
+    return selected
 
 
 def _make_questions(
