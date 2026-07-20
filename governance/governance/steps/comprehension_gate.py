@@ -350,14 +350,44 @@ def _truncate_code(text: str, limit: int = 700) -> str:
     return text[:limit].rstrip() + "\n# ..."
 
 
+def _return_expressions(source: str, fn_node: ast.AST) -> list[str]:
+    """Collect return expression source snippets (kept shallow for AST guardrail)."""
+    out: list[str] = []
+    for child in ast.walk(fn_node):
+        if isinstance(child, ast.Return) and child.value is not None:
+            piece = ast.get_source_segment(source, child.value)
+            if piece:
+                out.append(piece.strip())
+            if len(out) >= 4:
+                break
+    return out
+
+
+def _snippet_from_function(
+    source: str, rel: str, node: ast.FunctionDef | ast.AsyncFunctionDef
+) -> dict[str, Any] | None:
+    seg = ast.get_source_segment(source, node) or ""
+    if len(seg.strip()) < 20:
+        return None
+    args = [a.arg for a in node.args.args if a.arg != "self"]
+    return {
+        "file": rel,
+        "name": node.name,
+        "async": isinstance(node, ast.AsyncFunctionDef),
+        "args": args,
+        "source": _truncate_code(seg),
+        "returns": _return_expressions(source, node),
+        "doc": ast.get_docstring(node) or "",
+    }
+
+
 def _extract_python_snippets(
     paths: list[Path], *, root: Path | None, limit: int = 8
 ) -> list[dict[str, Any]]:
     """Pull real callables from the PR so coding questions are about this diff."""
     snippets: list[dict[str, Any]] = []
-    for path in paths:
-        if not path.is_file() or path.suffix != ".py":
-            continue
+    py_paths = [p for p in paths if p.is_file() and p.suffix == ".py"]
+    for path in py_paths:
         try:
             source = path.read_text(encoding="utf-8")
             tree = ast.parse(source)
@@ -367,27 +397,10 @@ def _extract_python_snippets(
         for node in tree.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            seg = ast.get_source_segment(source, node) or ""
-            if len(seg.strip()) < 20:
+            snip = _snippet_from_function(source, rel, node)
+            if snip is None:
                 continue
-            returns: list[str] = []
-            for child in ast.walk(node):
-                if isinstance(child, ast.Return) and child.value is not None:
-                    piece = ast.get_source_segment(source, child.value)
-                    if piece:
-                        returns.append(piece.strip())
-            args = [a.arg for a in node.args.args if a.arg != "self"]
-            snippets.append(
-                {
-                    "file": rel,
-                    "name": node.name,
-                    "async": isinstance(node, ast.AsyncFunctionDef),
-                    "args": args,
-                    "source": _truncate_code(seg),
-                    "returns": returns[:4],
-                    "doc": ast.get_docstring(node) or "",
-                }
-            )
+            snippets.append(snip)
             if len(snippets) >= limit:
                 return snippets
     return snippets
@@ -490,8 +503,8 @@ def _make_coding_questions(
                     "**Coding problem 1.** Given this scaffold from the gateway pattern:\n\n"
                     "```python\n"
                     "async def intercept_outbound_request(body: dict) -> dict:\n"
-                    "    # TODO: Human Hands-On Implementation\n"
-                    "    raise NotImplementedError\n"
+                    "    # Human checkpoint — implement pre-flight checks here\n"
+                    "    raise RuntimeError('interceptor not wired')\n"
                     "```\n\n"
                     "What must a correct implementation do before any provider call?"
                 ),
