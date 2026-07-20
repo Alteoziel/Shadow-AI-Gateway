@@ -51,9 +51,10 @@ Also required on Protect Main: Code Owner review, dismiss stale reviews, up-to-d
 - [x] Block force-pushes / branch deletion on default branch
 - [x] Require signed commits
 - [x] Code scanning rule in ruleset (CodeQL high_or_higher / errors)
-- [x] **Code scanning enabled** (repo Code security) — CodeQL workflow uploads SARIF
+- [x] **Code scanning enabled** (repo Code security — **default setup**; `Analyze (python/js/actions)` feed the Security tab)
 - [x] **Dependabot alerts + security updates enabled** (repo Code security; `.github/dependabot.yml` present)
 - [x] Required Preview deployment (`Preview – shadow-ai-gateway`)
+- [x] Required `CodeQL (Layer C)` job (security-extended analysis; SARIF artifact only while default setup is on)
 
 ### Still optional / later
 
@@ -71,3 +72,7 @@ Also required on Protect Main: Code Owner review, dismiss stale reviews, up-to-d
 
 5. **Governance dashboard deploy**  
    Browser quiz gate — see `SETUP_GOVERNANCE.md`.
+
+6. **(Optional) Switch Code scanning to Advanced setup**  
+   If you want *this* repo’s `CodeQL (Layer C)` workflow to upload SARIF with `security-extended` queries:  
+   Settings → Code security → Code scanning → **Disable default setup** / switch to **Advanced**, then set `upload: true` on the CodeQL step in `enterprise-hygiene.yml`. Until then, leave `upload: false` — default `Analyze (*)` jobs already publish alerts.
