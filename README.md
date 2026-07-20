@@ -6,19 +6,20 @@ Enterprise security proxy that sits between corporate users and public LLMs (Ope
 
 ## Pre-merge gate (AI Governance Engine)
 
-Before more gateway code ships, PRs are analyzed by a six-step suite:
+Before more gateway code ships, PRs are analyzed by a seven-step suite:
 
-1. AST structure · 2. OWASP security · 3. Boundary fuzz · 4. Big-O bench · 5. Copyright filter · 6. Human review dashboard
+1. AST · 2. OWASP · 3. Fuzz · 4. Big-O · 5. Copyright · **6. Comprehension quiz** · 7. Human review / merge
 
 | Component | Path |
 |-----------|------|
-| CLI (Steps 1–5) | [`governance/`](governance/) |
+| CLI (Steps 1–6) | [`governance/`](governance/) |
 | GitHub Action | [`.github/workflows/ai-guardrail.yml`](.github/workflows/ai-guardrail.yml) |
-| Review panel (Step 6) | [`dashboard/`](dashboard/) |
+| Review panel (Step 7) | [`dashboard/`](dashboard/) |
 | Human setup checklist | Ledger **§11** + [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) |
 
 ```bash
 cd governance && pip install -e ".[dev]" && ai-guardrail run --root ..
+ai-guardrail quiz --root .. --skip-llm   # practice understanding the change
 ```
 
 ## Phase 1 status

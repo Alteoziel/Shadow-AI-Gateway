@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -14,11 +15,12 @@ import type { Review, StepResult } from "@/lib/store";
 function statusColor(status: Review["status"]) {
   switch (status) {
     case "merged":
-      return "text-signal";
     case "approved":
       return "text-signal";
     case "rejected":
       return "text-alert";
+    case "pending_comprehension":
+      return "text-warn";
     default:
       return "text-warn";
   }
@@ -107,7 +109,214 @@ function StepCard({ step }: { step: StepResult }) {
   );
 }
 
+type PublicQuestion = {
+  id: string;
+  category: string;
+  category_label?: string;
+  prompt: string;
+  choices: string[];
+};
+
+function ComprehensionPanel({ review }: { review: Review }) {
+  const pack = review.comprehension;
+  const questions = (pack?.questions ?? []) as PublicQuestion[];
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [explanations, setExplanations] = useState<
+    { id: string; correct: boolean; explanation: string }[] | null
+  >(null);
+
+  const allAnswered = useMemo(
+    () => questions.length > 0 && questions.every((q) => answers[q.id] !== undefined),
+    [answers, questions]
+  );
+
+  if (!pack) {
+    return (
+      <section className="mb-8 rounded-lg border border-dashed border-white/15 p-5 text-sm text-mist">
+        No comprehension quiz attached yet. Re-run the guardrail suite so Step 6
+        can generate a beginner study guide + quiz for this PR.
+      </section>
+    );
+  }
+
+  if (review.comprehension_passed) {
+    const attempt = review.comprehension_attempt;
+    return (
+      <section className="mb-8 rounded-lg bg-signal/10 p-5">
+        <p className="text-xs uppercase tracking-[0.2em] text-signal">
+          Step 6 · Comprehension passed
+        </p>
+        <p className="mt-2 text-white">
+          You scored {attempt ? `${attempt.correct}/${attempt.total} (${Math.round(attempt.score * 100)}%)` : "a passing mark"}.
+          Step 7 approve/merge is unlocked.
+        </p>
+      </section>
+    );
+  }
+
+  async function submit() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/reviews/${review.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "submit_quiz", answers }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage(data.message || data.error || "Quiz submit failed");
+        return;
+      }
+      setExplanations(data.explanations ?? null);
+      if (data.attempt?.passed) {
+        window.location.reload();
+        return;
+      }
+      setMessage(
+        `Not yet — ${data.attempt.correct}/${data.attempt.total} ` +
+          `(need ≥ ${Math.round((data.attempt.threshold ?? 0.8) * 100)}%). ` +
+          `Re-read the study guide and try again.`
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const guide = pack.study_guide;
+
+  return (
+    <section className="mb-8 rounded-xl border border-warn/30 bg-black/20 p-5">
+      <p className="text-xs uppercase tracking-[0.2em] text-warn">
+        Step 6 · Comprehension Gate
+      </p>
+      <h3 className="mt-2 font-display text-2xl text-white">
+        Prove you understand this change
+      </h3>
+      <p className="mt-2 max-w-3xl text-sm text-mist">
+        You are learning — that is expected. Merging AI-written code you cannot
+        explain is the danger. Read the guide, then pass the quiz (≥{" "}
+        {Math.round((pack.pass_threshold ?? 0.8) * 100)}%) before Approve &amp; Merge unlocks.
+      </p>
+
+      <div className="mt-6 space-y-5 text-sm">
+        <div>
+          <h4 className="font-semibold text-white">What changed (plain English)</h4>
+          <p className="mt-1 text-white/85">{guide.elevator_pitch}</p>
+        </div>
+        <div>
+          <h4 className="font-semibold text-white">Bigger picture</h4>
+          <p className="mt-1 text-white/85">{guide.bigger_picture}</p>
+        </div>
+        <div>
+          <h4 className="font-semibold text-white">Vocabulary</h4>
+          <ul className="mt-2 space-y-2">
+            {guide.glossary.map((g) => (
+              <li key={g.term} className="rounded-md bg-black/30 px-3 py-2">
+                <span className="text-signal">{g.term}</span>
+                <span className="text-mist"> — {g.definition}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        {guide.key_functions?.length ? (
+          <div>
+            <h4 className="font-semibold text-white">Key functions</h4>
+            <ul className="mt-2 space-y-2">
+              {guide.key_functions.map((fn) => (
+                <li key={`${fn.file}-${fn.name}`} className="rounded-md bg-black/30 px-3 py-2">
+                  <code className="text-white">{fn.name}</code>
+                  <span className="text-mist"> · {fn.file}</span>
+                  <p className="mt-1 text-white/80">{fn.plain_english}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <div>
+          <h4 className="font-semibold text-white">Dependencies</h4>
+          <p className="mt-1 text-mist">{guide.dependencies.join(", ")}</p>
+        </div>
+        <div>
+          <h4 className="font-semibold text-white">Manual things you may need to do</h4>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-white/85">
+            {guide.manual_dev_tasks.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <h4 className="font-semibold text-white">Security</h4>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-white/85">
+            {guide.security_notes.map((t) => (
+              <li key={t}>{t}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="mt-8 space-y-6 border-t border-white/10 pt-6">
+        <h4 className="font-display text-xl text-white">Quiz</h4>
+        {questions.map((q, i) => (
+          <fieldset key={q.id} className="space-y-2">
+            <legend className="text-sm text-white">
+              <span className="text-mist">
+                {i + 1}. [{q.category_label || q.category}]
+              </span>{" "}
+              <span dangerouslySetInnerHTML={{ __html: q.prompt.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>") }} />
+            </legend>
+            <div className="space-y-1">
+              {q.choices.map((choice, idx) => (
+                <label
+                  key={idx}
+                  className={`flex cursor-pointer gap-2 rounded-md px-3 py-2 text-sm ${
+                    answers[q.id] === idx ? "bg-signal/20 text-white" : "bg-black/25 text-white/85"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    className="mt-1"
+                    name={q.id}
+                    checked={answers[q.id] === idx}
+                    onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: idx }))}
+                  />
+                  <span>{choice}</span>
+                </label>
+              ))}
+            </div>
+            {explanations?.find((e) => e.id === q.id) ? (
+              <p
+                className={`text-xs ${
+                  explanations.find((e) => e.id === q.id)?.correct
+                    ? "text-signal"
+                    : "text-alert"
+                }`}
+              >
+                {explanations.find((e) => e.id === q.id)?.explanation}
+              </p>
+            ) : null}
+          </fieldset>
+        ))}
+
+        <button
+          type="button"
+          disabled={!allAnswered || busy}
+          onClick={submit}
+          className="rounded-md bg-warn px-4 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? "Grading…" : "Submit comprehension quiz"}
+        </button>
+        {message ? <p className="text-sm text-alert">{message}</p> : null}
+      </div>
+    </section>
+  );
+}
+
 export function ReviewActions({ review }: { review: Review }) {
+  const locked = Boolean(review.comprehension && !review.comprehension_passed);
+
   async function act(action: "approve" | "reject" | "merge") {
     const note =
       action === "reject"
@@ -134,8 +343,9 @@ export function ReviewActions({ review }: { review: Review }) {
     <div className="mt-6 flex flex-wrap gap-3">
       <button
         type="button"
+        disabled={locked}
         onClick={() => act("approve")}
-        className="rounded-md bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:brightness-110"
+        className="rounded-md bg-signal px-4 py-2 text-sm font-semibold text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
       >
         Approve
       </button>
@@ -148,13 +358,15 @@ export function ReviewActions({ review }: { review: Review }) {
       </button>
       <button
         type="button"
+        disabled={locked}
         onClick={() => act("merge")}
-        className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-white/90"
+        className="rounded-md bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
       >
         Approve &amp; Merge
       </button>
       <p className={`w-full text-sm ${statusColor(review.status)}`}>
-        Status: {review.status.replace("_", " ")}
+        Status: {review.status.replaceAll("_", " ")}
+        {locked ? " · complete Step 6 quiz to unlock merge" : ""}
       </p>
     </div>
   );
@@ -165,7 +377,7 @@ export function ReviewDetail({ review }: { review: Review }) {
     <article className="rounded-xl bg-slatepanel/80 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
       <header className="mb-4 border-b border-white/10 pb-4">
         <p className="text-xs uppercase tracking-[0.2em] text-mist">
-          Human Review Panel · Step 6
+          Human Review Panel · Step 7
         </p>
         <h2 className="mt-2 font-display text-3xl text-white">
           {review.repo ? `${review.repo}` : "Local review"}
@@ -180,6 +392,9 @@ export function ReviewDetail({ review }: { review: Review }) {
         </p>
         <ReviewActions review={review} />
       </header>
+
+      <ComprehensionPanel review={review} />
+
       {review.steps.map((step) => (
         <StepCard key={step.step} step={step} />
       ))}

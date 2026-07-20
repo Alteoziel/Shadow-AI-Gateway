@@ -1,4 +1,4 @@
-"""Pipeline orchestrator — runs Steps 1–5 sequentially."""
+"""Pipeline orchestrator — runs Steps 1–6 sequentially (Step 7 = dashboard)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from governance.models import PipelineReport, StepResult
 from governance.steps import (
     ast_guardrail,
     benchmark_engine,
+    comprehension_gate,
     copyright_filter,
     fuzz_chamber,
     security_auditor,
@@ -41,7 +42,6 @@ def collect_paths(
         except OSError:
             pass
 
-    # Default: scan app + governance package + tests (never venv / node_modules)
     paths: list[Path] = []
     for folder in ("app", "governance/governance", "governance/tests", "tests"):
         base = root / folder
@@ -104,11 +104,13 @@ def run_pipeline(
     paths = collect_paths(
         root=root, files=files, changed_only=changed_only, base_ref=base_ref
     )
-    diff_text = None if skip_llm else get_diff_text(root, base_ref)
+    diff_text = get_diff_text(root, base_ref)
 
     steps: list[StepResult] = []
     steps.append(ast_guardrail.run(paths))
-    steps.append(security_auditor.run(paths, diff_text=diff_text))
+    steps.append(
+        security_auditor.run(paths, diff_text=None if skip_llm else diff_text)
+    )
     if skip_fuzz:
         steps.append(
             StepResult(
@@ -123,6 +125,14 @@ def run_pipeline(
         steps.append(fuzz_chamber.run(paths))
     steps.append(benchmark_engine.run(paths))
     steps.append(copyright_filter.run(paths))
+    steps.append(
+        comprehension_gate.run(
+            paths,
+            diff_text=diff_text,
+            root=root,
+            skip_llm=skip_llm,
+        )
+    )
 
     passed = all(s.passed or s.skipped for s in steps)
     report = PipelineReport(
@@ -138,6 +148,10 @@ def run_pipeline(
             ),
             "steps_passed": sum(1 for s in steps if s.passed or s.skipped),
             "steps_total": len(steps),
+            "comprehension_required": True,
+            "comprehension_note": (
+                "Step 6 quiz must be passed on the dashboard before Step 7 merge."
+            ),
         },
         pr_number=pr_number,
         commit_sha=commit_sha,

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getReview, updateReview } from "@/lib/store";
+import {
+  getReview,
+  updateReview,
+  gradeComprehension,
+  publicComprehension,
+} from "@/lib/store";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -9,12 +14,19 @@ export async function GET(_req: NextRequest, { params }: Params) {
   if (!review) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
-  return NextResponse.json({ review });
+  return NextResponse.json({
+    review: {
+      ...review,
+      // Never send answer keys to the client
+      comprehension: publicComprehension(review.comprehension),
+    },
+  });
 }
 
 /**
- * Approve + merge via GitHub REST API.
- * Requires GITHUB_TOKEN with contents:write + pull-requests:write on the repo.
+ * Actions:
+ * - submit_quiz — grade Step 6 comprehension (required before approve/merge)
+ * - approve / reject / merge — Step 7 human panel (merge blocked until quiz passed)
  */
 export async function POST(req: NextRequest, { params }: Params) {
   const { id } = await params;
@@ -24,8 +36,49 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const action = body.action as "approve" | "reject" | "merge";
+  const action = body.action as
+    | "approve"
+    | "reject"
+    | "merge"
+    | "submit_quiz";
   const note = (body.note as string) || null;
+
+  if (action === "submit_quiz") {
+    if (!review.comprehension) {
+      return NextResponse.json(
+        {
+          error: "no_quiz",
+          message: "No comprehension pack on this review yet. Re-run the guardrail suite.",
+        },
+        { status: 400 }
+      );
+    }
+    const answers = (body.answers ?? {}) as Record<string, number>;
+    const attempt = gradeComprehension(review.comprehension, answers);
+    const updated = await updateReview(id, {
+      comprehension_passed: attempt.passed,
+      comprehension_attempt: attempt,
+      status: attempt.passed ? "pending_review" : "pending_comprehension",
+      reviewer_note: note,
+    });
+
+    // Return explanations only after submit
+    const explanations = review.comprehension.questions.map((q) => ({
+      id: q.id,
+      correct: answers[q.id] === q.answer_index,
+      explanation: q.explanation,
+      expected_index: q.answer_index,
+    }));
+
+    return NextResponse.json({
+      review: {
+        ...updated,
+        comprehension: publicComprehension(updated?.comprehension),
+      },
+      attempt,
+      explanations,
+    });
+  }
 
   if (action === "reject") {
     const updated = await updateReview(id, {
@@ -33,6 +86,21 @@ export async function POST(req: NextRequest, { params }: Params) {
       reviewer_note: note,
     });
     return NextResponse.json({ review: updated });
+  }
+
+  if (action === "approve" || action === "merge") {
+    if (review.comprehension && !review.comprehension_passed) {
+      return NextResponse.json(
+        {
+          error: "comprehension_required",
+          message:
+            "Pass the Step 6 comprehension quiz before approving or merging. " +
+            "You should understand the change — vocabulary, flow, dependencies, " +
+            "manual tasks, and security — before shipping.",
+        },
+        { status: 403 }
+      );
+    }
   }
 
   if (action === "approve") {
@@ -44,7 +112,6 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   if (action === "merge") {
-    // Manual override routing: allow merge even if suite failed when reviewer insists
     const token = process.env.GITHUB_TOKEN || process.env.GH_MERGE_TOKEN;
     if (!token) {
       return NextResponse.json(

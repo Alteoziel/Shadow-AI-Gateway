@@ -1,13 +1,15 @@
-# AI Governance Review Dashboard (Step 6)
+# AI Governance Review Dashboard (Step 7)
 
 Human review panel for Shadow AI Gateway pull requests. Receives reports from
-the Python governance CLI (Steps 1–5) and can merge via GitHub’s REST API.
+the Python governance CLI (Steps 1–6) and can merge via GitHub’s REST API.
+
+**Step 6 comprehension quiz must be passed (≥80%) before Approve / Merge unlock.**
 
 ## Local run
 
 ```bash
 cd dashboard
-cp .env.example .env.local   # optional
+cp .env.example .env.local
 npm install
 npm run dev
 ```
@@ -19,13 +21,13 @@ Open http://localhost:3000
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `GOVERNANCE_DASHBOARD_SECRET` | Recommended in prod | Shared secret for CI → `/api/reviews` POSTs |
-| `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | Required for merge | PAT / fine-grained token with `contents:write` + `pull-requests:write` |
+| `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | Required for merge | PAT with `contents:write` + `pull-requests:write` |
 
 ## API
 
 - `GET /api/reviews` — list reviews
 - `POST /api/reviews` — ingest pipeline JSON (header `X-Governance-Secret`)
-- `POST /api/reviews/:id` — `{ "action": "approve" \| "reject" \| "merge" }`
+- `POST /api/reviews/:id` — `{ "action": "submit_quiz" | "approve" | "reject" | "merge" }`
 
 ## Deploy
 

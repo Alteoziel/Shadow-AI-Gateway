@@ -28,8 +28,16 @@ export async function POST(req: NextRequest) {
     repo: body.repo ?? null,
     steps: (body.steps ?? []) as StepResult[],
     summary: body.summary ?? {},
-    status: "pending_review",
+    // status inferred: pending_comprehension when Step 6 pack present
   });
 
-  return NextResponse.json({ review }, { status: 201 });
+  return NextResponse.json(
+    {
+      review: {
+        ...review,
+        // Don't echo answer keys back to CI logs unnecessarily in clients
+      },
+    },
+    { status: 201 }
+  );
 }

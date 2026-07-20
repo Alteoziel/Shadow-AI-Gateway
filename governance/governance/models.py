@@ -1,4 +1,4 @@
-"""Shared result models for the six-step governance pipeline."""
+"""Shared result models for the governance pipeline (Steps 1–6; Step 7 = dashboard)."""
 
 from __future__ import annotations
 

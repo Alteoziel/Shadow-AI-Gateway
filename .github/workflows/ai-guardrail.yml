@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   verify-code:
-    name: Governance Steps 1–5
+    name: Governance Steps 1–6
     runs-on: ubuntu-latest
     defaults:
       run:

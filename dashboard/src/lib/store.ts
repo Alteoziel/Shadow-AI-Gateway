@@ -32,7 +32,48 @@ export type StepResult = {
   skip_reason?: string | null;
 };
 
-export type ReviewStatus = "pending_review" | "approved" | "rejected" | "merged";
+export type QuizQuestion = {
+  id: string;
+  category: string;
+  category_label?: string;
+  prompt: string;
+  choices: string[];
+  answer_index: number;
+  explanation: string;
+};
+
+export type ComprehensionPack = {
+  learner_level?: string;
+  pass_threshold: number;
+  generator?: string;
+  study_guide: {
+    elevator_pitch: string;
+    bigger_picture: string;
+    glossary: { term: string; definition: string }[];
+    key_functions: { name: string; file: string; plain_english: string }[];
+    dependencies: string[];
+    manual_dev_tasks: string[];
+    security_notes: string[];
+    files_touched?: string[];
+  };
+  questions: QuizQuestion[];
+};
+
+export type ComprehensionAttempt = {
+  score: number;
+  correct: number;
+  total: number;
+  passed: boolean;
+  threshold: number;
+  at: string;
+};
+
+export type ReviewStatus =
+  | "pending_comprehension"
+  | "pending_review"
+  | "approved"
+  | "rejected"
+  | "merged";
 
 export type Review = {
   id: string;
@@ -47,6 +88,9 @@ export type Review = {
   summary: Record<string, unknown>;
   merge_sha?: string | null;
   reviewer_note?: string | null;
+  comprehension?: ComprehensionPack | null;
+  comprehension_passed?: boolean;
+  comprehension_attempt?: ComprehensionAttempt | null;
 };
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -68,6 +112,48 @@ async function writeStore(reviews: Review[]): Promise<void> {
   await fs.writeFile(STORE_PATH, JSON.stringify(reviews, null, 2), "utf8");
 }
 
+export function extractComprehension(
+  steps: StepResult[]
+): ComprehensionPack | null {
+  const step = steps.find((s) => s.step === "comprehension_gate");
+  const pack = step?.metrics?.comprehension;
+  if (!pack || typeof pack !== "object") return null;
+  return pack as ComprehensionPack;
+}
+
+/** Public quiz payload — answers stripped so the browser cannot peek. */
+export function publicComprehension(pack: ComprehensionPack | null | undefined) {
+  if (!pack) return null;
+  return {
+    learner_level: pack.learner_level,
+    pass_threshold: pack.pass_threshold,
+    generator: pack.generator,
+    study_guide: pack.study_guide,
+    questions: pack.questions.map(({ answer_index: _a, explanation: _e, ...rest }) => rest),
+  };
+}
+
+export function gradeComprehension(
+  pack: ComprehensionPack,
+  answers: Record<string, number>
+): ComprehensionAttempt {
+  const total = pack.questions.length;
+  let correct = 0;
+  for (const q of pack.questions) {
+    if (answers[q.id] === q.answer_index) correct += 1;
+  }
+  const score = total ? correct / total : 0;
+  const threshold = pack.pass_threshold ?? 0.8;
+  return {
+    score,
+    correct,
+    total,
+    passed: score >= threshold,
+    threshold,
+    at: new Date().toISOString(),
+  };
+}
+
 export async function listReviews(): Promise<Review[]> {
   const reviews = await ensureStore();
   return reviews.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -85,8 +171,11 @@ export async function upsertReview(
 ): Promise<Review> {
   const reviews = await ensureStore();
   const now = new Date().toISOString();
+  const comprehension = extractComprehension(payload.steps);
+  const initialStatus: ReviewStatus =
+    payload.status ??
+    (comprehension ? "pending_comprehension" : "pending_review");
 
-  // Dedupe by repo+pr+commit when present
   const existingIdx = reviews.findIndex(
     (r) =>
       r.repo &&
@@ -101,10 +190,25 @@ export async function upsertReview(
   );
 
   if (existingIdx >= 0) {
+    const prev = reviews[existingIdx];
     const updated: Review = {
-      ...reviews[existingIdx],
+      ...prev,
       ...payload,
-      status: payload.status ?? reviews[existingIdx].status,
+      comprehension,
+      // New commit resets comprehension unless already merged
+      comprehension_passed:
+        prev.commit_sha === payload.commit_sha ? prev.comprehension_passed : false,
+      comprehension_attempt:
+        prev.commit_sha === payload.commit_sha ? prev.comprehension_attempt : null,
+      status:
+        payload.status ??
+        (prev.status === "merged"
+          ? "merged"
+          : comprehension && !prev.comprehension_passed
+            ? "pending_comprehension"
+            : prev.status === "pending_comprehension" && prev.comprehension_passed
+              ? "pending_review"
+              : prev.status),
       updatedAt: now,
     };
     reviews[existingIdx] = updated;
@@ -116,13 +220,16 @@ export async function upsertReview(
     id: `rev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     createdAt: now,
     updatedAt: now,
-    status: payload.status ?? "pending_review",
+    status: initialStatus,
     passed: payload.passed,
     pr_number: payload.pr_number,
     commit_sha: payload.commit_sha,
     repo: payload.repo,
     steps: payload.steps,
     summary: payload.summary,
+    comprehension,
+    comprehension_passed: false,
+    comprehension_attempt: null,
   };
   reviews.unshift(review);
   await writeStore(reviews);

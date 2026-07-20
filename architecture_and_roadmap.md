@@ -6,24 +6,25 @@
 **Last updated:** 2026-07-20  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
-**Pre-merge gate:** AI Governance Engine (Steps 1–6) — `in_progress` (suite + CI + dashboard scaffolded)
+**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (comprehension gate added)
 
 ---
 
-## 0. Pre-Merge Gate — AI Governance Engine (Steps 1–6)
+## 0. Pre-Merge Gate — AI Governance Engine (Steps 1–7)
 
-> **Why this exists before more gateway code ships:** Today the only automated checks on PRs are Vercel deployment status and Cursor Bugbot. Those do **not** enforce AST structure, OWASP patterns, boundary fuzzing, Big-O profiling, or copyright similarity. This suite is the missing merge gate for `main`.
+> **Why this exists before more gateway code ships:** Today the only automated checks on PRs are Vercel deployment status and Cursor Bugbot. Those do **not** enforce AST structure, OWASP patterns, boundary fuzzing, Big-O profiling, copyright similarity, or — critically — that **you understand the change**. This suite is the missing merge gate for `main`.
 
 ### What was added (2026-07-20)
 
 | Piece | Path | Role |
 |-------|------|------|
-| Steps 1–5 CLI | `governance/` | Local + CI analysis suite (`ai-guardrail`) |
+| Steps 1–6 CLI | `governance/` | Local + CI analysis suite (`ai-guardrail`) |
 | CI workflow | `.github/workflows/ai-guardrail.yml` | Runs on every PR → `main` |
-| Step 6 dashboard | `dashboard/` | Human review + Approve/Merge via GitHub API |
+| Step 6 Comprehension | `governance/.../comprehension_gate.py` | Beginner study guide + quiz (blocks merge until passed) |
+| Step 7 dashboard | `dashboard/` | Human review + Approve/Merge via GitHub API |
 | Signature DB | `governance/governance/signatures/known_snippets.json` | Copyright fingerprints |
 
-### The six steps
+### The seven steps
 
 | # | Name | Implementation | Blocks merge? |
 |---|------|----------------|---------------|
@@ -32,7 +33,21 @@
 | 3 | Fuzz Chamber | Subprocess boundary injection (`null`, `[]`, huge payloads) | Yes (crashes) |
 | 4 | Benchmark Engine | Empirical timing at N=10…10k → Big-O slope | Informational (extensible) |
 | 5 | Copyright Filter | Rabin-Karp rolling hash + Levenshtein vs signatures | Yes (high similarity) |
-| 6 | Human Review Panel | Next.js dashboard; merge webhook → GitHub REST | Human gate |
+| 6 | **Comprehension Gate** | Beginner study guide + quiz (vocab, flow, deps, manual tasks, security) | **Yes — dashboard requires ≥80% before Approve/Merge** |
+| 7 | Human Review Panel | Next.js dashboard; merge webhook → GitHub REST | Human gate (after quiz) |
+
+### Step 6 — why it exists (learning + safety)
+
+You are very new to this stack. AI will write most of the boilerplate. **Rubber-stamping a PR you cannot explain is how secrets leak, bugs ship, and resume bullets become indefensible.**
+
+Step 6 forces a pause:
+
+1. **Study guide** — plain-English pitch, bigger picture, glossary, key functions, dependencies, manual tasks, security notes
+2. **Quiz** — categories: vocabulary, how it works, architecture, dependencies, manual dev tasks, functions, security
+3. **Pass bar** — ≥80% on the dashboard (or `ai-guardrail quiz` locally to practice)
+4. **Only then** — Step 7 Approve / Approve & Merge unlocks
+
+Tone: supportive teacher for a beginner, not a gotcha trap. Wrong answers show explanations so you learn.
 
 ### Plan adjustments (vs original 6-step deep dive)
 
@@ -43,10 +58,11 @@
 5. **Dashboard storage starts as JSON file** (`.data/reviews.json`); migrate to Supabase Postgres when Phase 3 lands (same DB target — do not invent a parallel store).
 6. **Vercel is OK for the dashboard only** — still forbidden for the streaming proxy (§8).
 7. **Bugbot + Vercel remain** — governance is additive, not a replacement.
+8. **Comprehension Gate inserted before human review** — original "Step 6 review panel" is now Step 7. Blind human review without understanding is treated as a first-class risk.
 
 ### Required human setup (for the gate to actually protect `main`)
 
-See **§11 Setup Checklist** below. Until branch protection requires the `Governance Steps 1–5` check, PRs can still merge without it.
+See **§11 Setup Checklist** below. Until branch protection requires the `Governance Steps 1–6` check, PRs can still merge without it.
 
 ---
 
@@ -269,9 +285,10 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 │   │       ├── security_auditor.py      # Step 2
 │   │       ├── fuzz_chamber.py          # Step 3
 │   │       ├── benchmark_engine.py      # Step 4
-│   │       └── copyright_filter.py      # Step 5
+│   │       ├── copyright_filter.py      # Step 5
+│   │       └── comprehension_gate.py    # Step 6 (quiz)
 │   └── tests/
-└── dashboard/                           # Step 6 (Next.js review panel)
+└── dashboard/                           # Step 7 (Next.js review panel)
     ├── package.json
     ├── README.md
     └── src/app/...
@@ -311,6 +328,7 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 |------|--------|--------|
 | 2026-07-19 | Initial Ledger created; Phase 1 scaffold kicked off; Checkpoint #1 armed | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Added §0 Pre-Merge Gate; scaffolded Steps 1–6 (`governance/`, CI workflow, `dashboard/`); §11 setup checklist | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Inserted Step 6 Comprehension Gate (beginner quiz); human review panel becomes Step 7; merge locked until ≥80% | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -335,13 +353,15 @@ Without these steps, the suite runs in CI but GitHub will still allow merges on 
 GitHub → **Settings → Branches → Branch protection rule** for `main`:
 
 1. Require a pull request before merging
-2. Require status checks to pass → enable **`Governance Steps 1–5`**
+2. Require status checks to pass → enable **`Governance Steps 1–6`**
 3. (Recommended) Do **not** allow bypassing for admins while learning the workflow
 4. Keep existing Vercel + Bugbot checks if desired — they stay complementary
 
 Until step 2 is enabled, the governance workflow is advisory only.
 
-### C. Deploy the Step 6 dashboard
+**Also enforce comprehension in practice:** even with CI green, use the dashboard’s Step 6 quiz before merge — Approve & Merge stays locked until you pass (≥80%).
+
+### C. Deploy the Step 7 dashboard
 
 ```bash
 cd dashboard
@@ -358,6 +378,7 @@ Create a fine-grained PAT / GitHub App token with `contents: write` + `pull-requ
 ```bash
 cd governance && pip install -e ".[dev]" && pytest
 ai-guardrail run --root .. --skip-llm
+ai-guardrail quiz --root .. --skip-llm   # practice Step 6 locally
 ```
 
 ### E. What you still do manually (resume-defensible CS)
@@ -368,12 +389,13 @@ The suite is implemented end-to-end so CI works Day 1. Deepen ownership by exten
 2. **Fuzz** — target real gateway helpers once Checkpoint #1 lands
 3. **Benchmark** — wire per-PR function injection instead of calibration profiles only
 4. **Copyright** — grow `known_snippets.json` with frameworks you must not paste
-5. **Dashboard** — swap `.data/reviews.json` for Supabase when Phase 3 starts
+5. **Comprehension** — add domain questions as you learn new phases (scrubbing, SQL, Terraform)
+6. **Dashboard** — swap `.data/reviews.json` for Supabase when Phase 3 starts
 
 ### F. Relationship to Bugbot & Vercel
 
 | Check | What it catches | What it misses |
 |-------|-----------------|----------------|
-| Vercel | Dashboard deploy health | Gateway streaming safety, AST, OWASP, fuzz |
-| Bugbot | Reviewer-style code critique | Deterministic policy enforcement + merge gate |
-| **AI Guardrail** | Structural / security / fuzz / copyright policy | Product UX of the dashboard |
+| Vercel | Dashboard deploy health | Gateway streaming safety, AST, OWASP, fuzz, understanding |
+| Bugbot | Reviewer-style code critique | Deterministic policy + forcing *you* to understand |
+| **AI Guardrail** | Structural / security / fuzz / copyright / **comprehension quiz** | Product UX polish of the dashboard |

@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { getReview, listReviews } from "@/lib/store";
+import {
+  getReview,
+  listReviews,
+  publicComprehension,
+  type Review,
+} from "@/lib/store";
 import { ReviewDetail } from "@/components/ReviewPanel";
 
 export const dynamic = "force-dynamic";
@@ -8,10 +13,19 @@ type Props = {
   searchParams: Promise<{ id?: string }>;
 };
 
+function forClient(review: Review): Review {
+  return {
+    ...review,
+    // Strip answer keys from the RSC → client payload
+    comprehension: publicComprehension(review.comprehension) as Review["comprehension"],
+  };
+}
+
 export default async function HomePage({ searchParams }: Props) {
   const { id } = await searchParams;
   const reviews = await listReviews();
-  const selected = id ? await getReview(id) : reviews[0] ?? null;
+  const selectedRaw = id ? await getReview(id) : reviews[0] ?? null;
+  const selected = selectedRaw ? forClient(selectedRaw) : null;
 
   return (
     <main>
@@ -23,8 +37,9 @@ export default async function HomePage({ searchParams }: Props) {
           Governance
         </h1>
         <p className="mt-4 max-w-2xl text-lg text-mist">
-          Engineering managers review AST, OWASP, fuzz, Big-O, and copyright
-          reports before merging to <code className="text-white/80">main</code>.
+          Pass the beginner comprehension quiz, then review AST, OWASP, fuzz,
+          Big-O, and copyright reports before merging to{" "}
+          <code className="text-white/80">main</code>.
         </p>
       </header>
 
@@ -55,7 +70,9 @@ export default async function HomePage({ searchParams }: Props) {
                       {r.pr_number ? ` #${r.pr_number}` : ""}
                     </span>
                     <span className="mt-1 block text-xs text-mist">
-                      {r.status} · {r.passed ? "suite pass" : "suite fail"}
+                      {r.status.replaceAll("_", " ")} ·{" "}
+                      {r.comprehension_passed ? "quiz done" : "quiz pending"} ·{" "}
+                      {r.passed ? "suite pass" : "suite fail"}
                     </span>
                   </Link>
                 </li>
