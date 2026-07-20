@@ -3,7 +3,6 @@ import json
 import httpx
 import pytest
 import respx
-
 from app.config import Settings
 from app.proxy.providers.anthropic import (
     ANTHROPIC_MESSAGES_URL,
@@ -14,8 +13,8 @@ from app.proxy.providers.openai import OPENAI_CHAT_URL, OpenAIProvider
 
 def _settings() -> Settings:
     return Settings(
-        OPENAI_API_KEY="openai-test-key",
-        ANTHROPIC_API_KEY="anthropic-test-key",
+        OPENAI_API_KEY="your_openai_test_key",
+        ANTHROPIC_API_KEY="your_anthropic_test_key",
     )
 
 
