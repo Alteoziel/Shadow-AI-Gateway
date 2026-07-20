@@ -13,6 +13,13 @@ from governance.steps import (
 from governance.steps.benchmark_engine import estimate_big_o
 
 
+def _write_app_file(tmp_path: Path, relative: str, source: str) -> Path:
+    path = tmp_path / "app" / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    return path
+
+
 def test_ast_flags_nested_loops(tmp_path: Path) -> None:
     src = tmp_path / "bad.py"
     src.write_text(
@@ -46,6 +53,99 @@ def test_ast_clean_file(tmp_path: Path) -> None:
     )
     result = ast_guardrail.run([src])
     assert result.passed
+
+
+def test_ast_flags_requests_sync_usage_in_app(tmp_path: Path) -> None:
+    src = _write_app_file(
+        tmp_path,
+        "bad_requests.py",
+        "import requests\n\n"
+        "def call(url):\n"
+        "    return requests.get(url)\n",
+    )
+    result = ast_guardrail.run([src])
+    assert not result.passed
+    assert any(
+        f.rule_id == "AST004_SYNC_HTTP_CLIENT_IN_APP" for f in result.findings
+    )
+
+
+def test_ast_flags_httpx_sync_client_in_app(tmp_path: Path) -> None:
+    src = _write_app_file(
+        tmp_path,
+        "bad_httpx.py",
+        "from httpx import Client\n\n"
+        "def call(url):\n"
+        "    with Client() as client:\n"
+        "        return client.get(url)\n",
+    )
+    result = ast_guardrail.run([src])
+    assert not result.passed
+    assert any(
+        f.rule_id == "AST004_SYNC_HTTP_CLIENT_IN_APP" for f in result.findings
+    )
+
+
+def test_ast_allows_httpx_async_client_in_app(tmp_path: Path) -> None:
+    src = _write_app_file(
+        tmp_path,
+        "ok_async_httpx.py",
+        "import httpx\n\n"
+        "async def call(url):\n"
+        "    async with httpx.AsyncClient() as client:\n"
+        "        return await client.get(url)\n",
+    )
+    result = ast_guardrail.run([src])
+    assert result.passed
+    assert not any(
+        f.rule_id == "AST004_SYNC_HTTP_CLIENT_IN_APP" for f in result.findings
+    )
+
+
+def test_ast_sync_http_rule_is_app_scoped(tmp_path: Path) -> None:
+    src = tmp_path / "governance_client.py"
+    src.write_text(
+        "import httpx\n\n"
+        "def call(url):\n"
+        "    with httpx.Client() as client:\n"
+        "        return client.get(url)\n",
+        encoding="utf-8",
+    )
+    result = ast_guardrail.run([src])
+    assert result.passed
+    assert not any(
+        f.rule_id == "AST004_SYNC_HTTP_CLIENT_IN_APP" for f in result.findings
+    )
+
+
+def test_ast_flags_chat_route_provider_before_interceptor(tmp_path: Path) -> None:
+    src = _write_app_file(
+        tmp_path,
+        "api/v1/chat.py",
+        "async def intercept_outbound_request(**kwargs):\n"
+        "    return kwargs\n\n"
+        "def _resolve_provider(request):\n"
+        "    return 'openai'\n\n"
+        "async def chat_completions(request_body, request):\n"
+        "    provider_name = _resolve_provider(request_body)\n"
+        "    normalized = await intercept_outbound_request(body={})\n"
+        "    return provider_name, normalized\n",
+    )
+    result = ast_guardrail.run([src])
+    assert not result.passed
+    assert any(
+        f.rule_id == "AST005_CHAT_INTERCEPTOR_ORDER" for f in result.findings
+    )
+
+
+def test_ast_current_chat_route_calls_interceptor_before_provider() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    src = repo_root / "app" / "api" / "v1" / "chat.py"
+    result = ast_guardrail.run([src])
+    assert result.passed
+    assert not any(
+        f.rule_id == "AST005_CHAT_INTERCEPTOR_ORDER" for f in result.findings
+    )
 
 
 def test_security_hardcoded_secret(tmp_path: Path) -> None:
