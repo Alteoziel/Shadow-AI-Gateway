@@ -299,6 +299,11 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 /
 ├── architecture_and_roadmap.md          # THIS FILE — The Ledger
 ├── README.md
+├── SETUP_GOVERNANCE.md                  # Human setup for governance CI + dashboard
+├── .cursor/
+│   └── qrspi/                           # QRSPI playbooks, autonomy, context isolation
+├── thoughts/
+│   └── qrspi/                           # QRSPI artifacts per task
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml                       # Gateway (Phase 1+)
@@ -345,15 +350,19 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 ## 8. Non-Negotiable Guardrails
 
 1. **No Vercel for the streaming proxy** — use Docker on Fly.io, Render, or (Phase 4) AWS ECS for long-lived async streaming.
-2. **Sub-100ms scrub budget** applies from Phase 2 onward; measure and enforce with validation scripts.
-3. **Never auto-complete human checkpoint blocks** — agents scaffold, document, and test contracts only.
-4. **Secrets only via environment variables** — never commit API keys or `.env` files.
-5. **The Ledger stays current** — update phase/checkpoint status in this file whenever status changes.
-6. **Supabase PostgreSQL** is the production database target (Phase 3); do not invent a parallel primary store.
-7. **Bugbot** is integrated for GitHub issue tracking; treat review findings as first-class work items.
-8. **Opus 4.8 and GPT-5.6 Sol** are restricted roles — do not invoke without explicit instruction.
-9. **No merge to `main` without the AI Guardrail check** once branch protection is enabled (§11). Agents must not disable or skip the workflow to land green builds.
-10. **Dashboard may use Vercel; the streaming gateway may not.**
+2. **Developmental work must use QRSPI** and store artifacts under `thoughts/qrspi/`.
+3. **Each QRSPI stage must run with fresh context** and only its allowed artifact inputs.
+4. **QRSPI process gates are autonomous**; Human-in-the-Loop product checkpoints are not.
+5. **Sub-100ms scrub budget** applies from Phase 2 onward; measure and enforce with validation scripts.
+6. **Never auto-complete human checkpoint blocks** — agents scaffold, document, and test contracts only.
+7. **Secrets only via environment variables** — never commit API keys or `.env` files.
+8. **The Ledger stays current** — update phase/checkpoint status in this file whenever status changes.
+9. **Supabase PostgreSQL** is the production database target (Phase 3); do not invent a parallel primary store.
+10. **Bugbot** is integrated for GitHub issue tracking; treat review findings as first-class work items.
+11. **Opus 4.8 and GPT-5.6 Sol** are restricted roles — do not invoke without explicit instruction.
+12. **No merge to `main` without the `Governance Steps 1-6` status check** once branch protection is enabled (§11). Agents must not disable or skip the workflow to land green builds.
+13. **Step 7 review actions require the dashboard comprehension quiz pass at ≥80%.**
+14. **Dashboard may use Vercel; the streaming gateway may not.**
 
 ---
 

@@ -259,12 +259,12 @@ Confirm every branch-protection instruction uses `Governance Steps 1-6` exactly.
 ### Verification
 
 #### Automated
-- [ ] `rg -n "SETUP_GOVERNANCE|\\.cursor/qrspi|thoughts/qrspi|Governance Steps 1.?6|branch protection|Non-Negotiable|fresh context|allowed artifact inputs" architecture_and_roadmap.md README.md SETUP_GOVERNANCE.md` confirms discoverability, branch protection wording, and guardrail consistency.
-- [ ] `git diff -- app/proxy/interceptor.py app/api/v1/chat.py tests/test_interceptor_contract.py tests/test_proxy_routing.py` is empty.
+- [x] `rg -n "SETUP_GOVERNANCE|\\.cursor/qrspi|thoughts/qrspi|Governance Steps 1.?6|branch protection|Non-Negotiable|fresh context|allowed artifact inputs" architecture_and_roadmap.md README.md SETUP_GOVERNANCE.md` confirms discoverability, branch protection wording, and guardrail consistency.
+- [x] `git diff -- app/proxy/interceptor.py app/api/v1/chat.py tests/test_interceptor_contract.py tests/test_proxy_routing.py` is empty.
 
 #### Manual
-- [ ] Ledger §7 shows both QRSPI paths and `SETUP_GOVERNANCE.md`.
-- [ ] Ledger §8 connects QRSPI law, branch protection, and human checkpoint preservation without weakening any existing runtime guardrail.
+- [x] Ledger §7 shows both QRSPI paths and `SETUP_GOVERNANCE.md`. — autonomous: verified via layout tree in rg output
+- [x] Ledger §8 connects QRSPI law, branch protection, and human checkpoint preservation without weakening any existing runtime guardrail. — autonomous: verified via guardrails 2-4, 6, 12-13
 
 ---
 

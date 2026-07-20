@@ -116,3 +116,5 @@ See `.env.example` for a copy-paste template.
 ## Project layout
 
 See **§7** in [The Ledger](architecture_and_roadmap.md) for the canonical repository tree and phase boundaries.
+
+Branch protection on `main` requires the status check **`Governance Steps 1-6`** once enabled — see Ledger **§11** and [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) for the human setup checklist.
