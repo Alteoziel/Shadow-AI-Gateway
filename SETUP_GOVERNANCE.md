@@ -115,7 +115,13 @@ Secret **names** are correct as repository secrets under Actions. Only the URL v
 5. Click **Unlock actions** → paste the shared secret
 6. Read the study guide → take the quiz (≥80%) → Approve / Merge unlocks
 
-If the list is empty: CI could not POST (wrong URL/secret), or Redis is missing. Check the Actions log for dashboard POST soft-fail messages, and the Vercel function logs for Redis errors.
+If the list is empty: CI could not POST. Check the latest **Governance Steps 1–6**
+Actions log for `Dashboard post failed`. A **401** means
+`GOVERNANCE_DASHBOARD_SECRET` in GitHub ≠ the Vercel env var (they must match
+exactly). After fixing, re-run the workflow on an open PR.
+
+Also confirm `GOVERNANCE_DASHBOARD_URL` is your live host with no trailing slash,
+e.g. `https://shadow-ai-gateway.vercel.app`.
 
 If the site returns **500 / Application error**: open `/api/health` on the same host. You should see JSON with `"ok": true`. Then check Deployment → Logs. Usual causes: Redis not linked to **Preview** (only Production), or an old deploy writing to a read-only path. Redeploy after connecting Upstash to both environments.
 

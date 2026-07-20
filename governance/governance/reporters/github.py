@@ -122,16 +122,26 @@ def post_to_dashboard(report: PipelineReport) -> dict[str, Any] | None:
     if not endpoint:
         return None
     secret = os.getenv("GOVERNANCE_DASHBOARD_SECRET", "")
+    url = f"{endpoint.rstrip('/')}/api/reviews"
     try:
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(
-                f"{endpoint.rstrip('/')}/api/reviews",
+                url,
                 headers={
                     "Content-Type": "application/json",
                     "X-Governance-Secret": secret,
                 },
                 json=report.model_dump(),
             )
+            if resp.status_code == 401:
+                return {
+                    "ok": False,
+                    "error": (
+                        "401 Unauthorized — GOVERNANCE_DASHBOARD_SECRET in GitHub "
+                        "Actions must exactly match GOVERNANCE_DASHBOARD_SECRET on "
+                        f"the dashboard host ({endpoint.rstrip('/')})."
+                    ),
+                }
             resp.raise_for_status()
             return resp.json()
     except Exception as exc:  # noqa: BLE001 — never fail the suite on dashboard I/O
