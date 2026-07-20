@@ -2,7 +2,8 @@
 
 Enterprise security proxy that sits between corporate users and public LLMs (OpenAI / Anthropic) to intercept outbound traffic **pre-flight**.
 
-> **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger** — single source of truth for phases, checkpoints, and guardrails.
+> **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger** — phases, checkpoints, guardrails.  
+> **Task process:** [`.cursor/qrspi/`](.cursor/qrspi/) — mandatory QRSPI (see `AUTONOMOUS_MODE.md` + `CONTEXT_ISOLATION.md`).
 
 ## Pre-merge gate (AI Governance Engine)
 
@@ -13,14 +14,18 @@ Before more gateway code ships, PRs are analyzed by a seven-step suite:
 | Component | Path |
 |-----------|------|
 | CLI (Steps 1–6) | [`governance/`](governance/) |
-| GitHub Action | [`.github/workflows/ai-guardrail.yml`](.github/workflows/ai-guardrail.yml) |
+| GitHub Action | [`.github/workflows/ai-guardrail.yml`](.github/workflows/ai-guardrail.yml) — check name **`Governance Steps 1–6`** |
 | Review panel (Step 7) | [`dashboard/`](dashboard/) |
+| **Enterprise Layers B–E** | [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md) + [`.github/workflows/enterprise-hygiene.yml`](.github/workflows/enterprise-hygiene.yml) |
 | Human setup checklist | Ledger **§11** + [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) |
 
 ```bash
 cd governance && pip install -e ".[dev]" && ai-guardrail run --root ..
-ai-guardrail quiz --root .. --skip-llm   # practice understanding the change
+ai-guardrail quiz --root .. --skip-llm   # YOUR understanding test (not graded inside Actions)
 ```
+
+**Actions vs your quiz:** CI generates the quiz and must stay green. You take the quiz locally (`ai-guardrail quiz`) or on the dashboard after it’s deployed — that’s how *you* prove you understand the PR.
+Require status checks on `main`: **`Governance Steps 1–6`**, **`Enterprise Layers B–E`**, and **`CodeQL (Layer C)`**. Operator checklist: [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
 ## Phase 1 status
 
