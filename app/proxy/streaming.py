@@ -12,10 +12,6 @@ async def relay_sse_stream(
 ) -> StreamingResponse:
     """Relay an upstream SSE/chunked body to the client without buffering.
 
-    This helper is intentionally byte-preserving: OpenAI SSE and Anthropic
-    Messages SSE are relayed as received. Provider-specific stream
-    normalization must happen before this helper if a future phase adds it.
-
     Optional `on_complete` runs after the upstream body is fully consumed
     (or aborted) — use it to close provider HTTP clients without cutting
     the stream short.

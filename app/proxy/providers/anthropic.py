@@ -3,11 +3,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-from app.proxy.providers.base import (
-    BaseLLMProvider,
-    map_httpx_error,
-    require_api_key,
-)
+from app.proxy.providers.base import BaseLLMProvider
 
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -21,9 +17,8 @@ class AnthropicProvider(BaseLLMProvider):
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
 
     def _headers(self) -> dict[str, str]:
-        api_key = require_api_key("anthropic", self._api_key)
         return {
-            "x-api-key": api_key,
+            "x-api-key": self._api_key,
             "anthropic-version": ANTHROPIC_VERSION,
             "Content-Type": "application/json",
         }
@@ -74,17 +69,14 @@ class AnthropicProvider(BaseLLMProvider):
 
     async def chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
         anthropic_payload = self._to_anthropic_payload(payload)
-        try:
-            response = await self._client.post(
-                ANTHROPIC_MESSAGES_URL,
-                headers=self._headers(),
-                json=anthropic_payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            return self._to_openai_shape(data, model=payload["model"])
-        except httpx.HTTPError as exc:
-            raise map_httpx_error("anthropic", exc) from exc
+        response = await self._client.post(
+            ANTHROPIC_MESSAGES_URL,
+            headers=self._headers(),
+            json=anthropic_payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return self._to_openai_shape(data, model=payload["model"])
 
     async def chat_completion_stream(
         self,
@@ -94,23 +86,15 @@ class AnthropicProvider(BaseLLMProvider):
             **self._to_anthropic_payload(payload),
             "stream": True,
         }
-        response: httpx.Response | None = None
-        try:
-            response = await self._client.send(
-                self._client.build_request(
-                    "POST",
-                    ANTHROPIC_MESSAGES_URL,
-                    headers=self._headers(),
-                    json=anthropic_payload,
-                ),
-                stream=True,
-            )
-            response.raise_for_status()
-            return response
-        except httpx.HTTPError as exc:
-            if response is not None:
-                await response.aclose()
-            raise map_httpx_error("anthropic", exc) from exc
+        return await self._client.send(
+            self._client.build_request(
+                "POST",
+                ANTHROPIC_MESSAGES_URL,
+                headers=self._headers(),
+                json=anthropic_payload,
+            ),
+            stream=True,
+        )
 
     @staticmethod
     def _to_openai_shape(data: dict[str, Any], *, model: str) -> dict[str, Any]:

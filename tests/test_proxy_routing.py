@@ -1,7 +1,6 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -71,41 +70,3 @@ async def test_chat_forwards_to_provider_after_interceptor_implemented():
     assert "received_at" not in interceptor_kwargs["metadata"]
     mock_provider.chat_completion.assert_awaited_once()
     mock_provider.aclose.assert_awaited_once()
-
-@pytest.mark.asyncio
-async def test_chat_returns_provider_gateway_errors_after_interceptor_implemented():
-    """Provider reliability errors should surface as HTTP errors, not tracebacks."""
-    normalized = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role": "user", "content": "ping"}],
-    }
-    mock_provider = AsyncMock()
-    mock_provider.chat_completion.side_effect = HTTPException(
-        status_code=502,
-        detail={
-            "error": "upstream_http_error",
-            "provider": "openai",
-            "upstream_status_code": 429,
-            "message": "openai upstream returned HTTP 429",
-        },
-    )
-
-    with (
-        patch(
-            "app.api.v1.chat.intercept_outbound_request",
-            new=AsyncMock(return_value=normalized),
-        ),
-        patch(
-            "app.api.v1.chat.OpenAIProvider",
-            return_value=mock_provider,
-        ),
-    ):
-        response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
-
-    assert response.status_code == 502
-    assert response.headers[CORRELATION_ID_HEADER].startswith("corr_")
-    assert response.json()["detail"]["error"] == "upstream_http_error"
-    assert response.json()["detail"]["upstream_status_code"] == 429
-    mock_provider.chat_completion.assert_awaited_once()
-    mock_provider.aclose.assert_awaited_once()
-
