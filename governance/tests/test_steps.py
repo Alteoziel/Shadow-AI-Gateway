@@ -57,6 +57,34 @@ def test_security_hardcoded_secret(tmp_path: Path) -> None:
     assert any(f.rule_id == "SEC001_HARDCODED_SECRET" for f in result.findings)
 
 
+def test_security_ignores_semgrep_rule_yaml(tmp_path: Path) -> None:
+    """Rule definitions mention os.system/pickle — must not block the suite."""
+    rules = tmp_path / ".semgrep.yml"
+    rules.write_text(
+        "rules:\n"
+        "  - id: demo\n"
+        "    pattern: os.system(...)\n"
+        "    message: forbid pickle.loads\n",
+        encoding="utf-8",
+    )
+    result = security_auditor.run([rules], diff_text=None)
+    assert result.passed
+    assert result.findings == []
+
+
+def test_security_ssrf_requires_call_not_type_hint(tmp_path: Path) -> None:
+    src = tmp_path / "types.py"
+    src.write_text(
+        "import httpx\n"
+        "def handle(request: httpx.Request) -> None:\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    result = security_auditor.run([src], diff_text=None)
+    assert result.passed
+    assert not any(f.rule_id == "SEC005_SSRF" for f in result.findings)
+
+
 def test_big_o_estimator_linear() -> None:
     sizes = [10, 100, 1000, 10000]
     times = [s * 1e-6 for s in sizes]

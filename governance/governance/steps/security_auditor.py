@@ -47,7 +47,9 @@ OWASP_PATTERNS: list[tuple[str, Severity, str, re.Pattern[str]]] = [
         "SEC005_SSRF",
         Severity.WARNING,
         "Outbound HTTP with user-controlled URL risk — validate allowlists",
-        re.compile(r"""(?i)(httpx\.(get|post|request)|requests\.(get|post)|urllib\.request)"""),
+        re.compile(
+            r"""(?i)(httpx\.(get|post|request)|requests\.(get|post)|urllib\.request\.urlopen)\s*\("""
+        ),
     ),
     (
         "SEC006_PATH_TRAVERSAL",
@@ -56,6 +58,12 @@ OWASP_PATTERNS: list[tuple[str, Severity, str, re.Pattern[str]]] = [
         re.compile(r"""(?i)open\s*\(\s*(?!['\"])"""),
     ),
 ]
+
+# Injection / RCE patterns only make sense on executable source — not rule YAML.
+_CODE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx"}
+# Config may still hide secrets.
+_CONFIG_SUFFIXES = {".yml", ".yaml", ".toml"}
+_SECRET_ONLY_RULES = {"SEC001_HARDCODED_SECRET"}
 
 SYSTEM_PROMPT = """You are an OWASP-focused secure-code reviewer for an enterprise AI proxy gateway.
 Review ONLY the provided git diff / code snippets.
@@ -70,6 +78,8 @@ If nothing found, return [].
 def _scan_patterns(path: Path, source: str) -> list[Finding]:
     findings: list[Finding] = []
     for rule_id, severity, message, pattern in OWASP_PATTERNS:
+        if path.suffix in _CONFIG_SUFFIXES and rule_id not in _SECRET_ONLY_RULES:
+            continue
         for match in pattern.finditer(source):
             line = source[: match.start()].count("\n") + 1
             # Allow .env.example style placeholders
@@ -163,10 +173,13 @@ def run(paths: list[Path], diff_text: str | None = None) -> StepResult:
     for path in paths:
         if not path.is_file():
             continue
-        if path.suffix not in {".py", ".ts", ".tsx", ".js", ".jsx", ".yml", ".yaml", ".toml"}:
+        if path.suffix not in (_CODE_SUFFIXES | _CONFIG_SUFFIXES):
             continue
-        # Skip governance signature DB and example env
-        if path.name in {".env.example", "known_snippets.json"}:
+        # Skip governance signature DB, example env, and Semgrep rule defs
+        # (rule YAML contains pattern text like os.system / pickle.loads).
+        if path.name in {".env.example", "known_snippets.json", ".semgrep.yml"}:
+            continue
+        if path.name.endswith(".semgrep.yml") or path.name == "semgrep.yml":
             continue
         scanned += 1
         source = path.read_text(encoding="utf-8", errors="replace")
