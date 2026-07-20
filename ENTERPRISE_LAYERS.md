@@ -18,7 +18,7 @@ Require this additional status check on `main`:
 
 (plus existing **`Governance Steps 1–6`**)
 
-CodeQL runs as a sibling job: **`CodeQL (Layer C)`** — advisory until you enable **Code scanning** in repo Settings → Code security. After the first successful upload, require it in branch protection.
+CodeQL runs as a sibling job: **`CodeQL (Layer C)`** — analyzes with `upload: false` until Code scanning is enabled; then flip upload on and require the check.
 
 ## Manual follow-ups (cannot automate fully)
 
