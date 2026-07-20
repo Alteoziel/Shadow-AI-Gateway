@@ -101,7 +101,9 @@ By project end, the human must truthfully claim:
 | **THE DOER / ACHIEVER** | Composer 2.5 / Auto 2.5 | Bulk file generation, boilerplate, configurations, baseline tests, refactoring. |
 | **THE SECURITY CHIEF** | GPT-5.6 Sol | Extreme edge cases only: data scrubbing perfection, pre-flight tokenization, cryptographic verification, exhaustive security test coverage. |
 
-**Default cycle:** Grok designs → Composer builds → Grok reviews → Human fills checkpoint → validation scripts run.
+**Default cycle:** Ledger preflight → QRSPI (isolated subagents, autonomous answers) → Composer implements plan → Grok reviews → Human fills product checkpoints → governance validation.
+
+> QRSPI autonomy does **not** override Human Hands-On product checkpoints.
 
 ---
 
@@ -210,20 +212,49 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 ---
 
-## 5. Operational Protocol (Every Developmental Cycle)
+## 5. Operational Protocol - QRSPI Is Mandatory
 
-1. **Design & Plan (Grok 4.5)** — Map file modifications. Define contracts, constraints, and the human checkpoint boundary.
-2. **Boilerplate (Composer / Auto 2.5)** — Generate structural code, configs, provider adapters, baseline tests. **Never** auto-complete human checkpoint implementations.
-3. **Establish Learning Checkpoint** — Before a core feature block is finished, inject a clear:
+Every developmental task follows QRSPI unless the Ledger explicitly defines a narrower fast path.
 
-   ```text
-   TODO: Human Hands-On Implementation
-   ```
+| Stage | Purpose | Allowed inputs | Output / gate |
+|-------|---------|----------------|---------------|
+| 1. Question | Neutralize the task into research questions | User task + Ledger | `task.md`, `questions.md` |
+| 2. Research | Gather codebase facts only | `questions.md`, Ledger | `research.md` |
+| 3. Design | Choose the implementation direction | `task.md`, `questions.md`, `research.md`, Ledger | `design.md` with autonomous decisions |
+| 4. Structure | Split into independently verifiable slices | `design.md`, `research.md`, Ledger | `structure.md` |
+| 5. Plan | Expand slices into tactical implementation steps | `structure.md`, `design.md`, `research.md`, Ledger | `plan.md` |
+| 6. Worktree | Create isolation boundary | QRSPI artifacts | isolated branch/worktree; no implementation |
+| 7. Implement | Execute the checked plan one phase at a time | `plan.md` first | code/docs changes, verification, commits |
+| 8. PR | Present the verified change | `design.md`, `plan.md`, diff, logs | PR referencing Ledger and artifacts |
 
-   block in the designated file.
-4. **Provide the Cheat Sheet** — Accompany the checkpoint with a concise **3-bullet** conceptual breakdown of *why* the underlying engineering concept works.
-5. **Human Implements** — Engineering Manager fills the checkpoint.
-6. **Security & Latency Validation** — After human completion, run validation scripts for structural security and (from Phase 2 onward) the sub-100ms processing budget.
+### Autonomous QRSPI
+
+QRSPI does not wait for process approval. When a stage exposes choices, the agent chooses the option best grounded in the Ledger, research, and existing code, records the rationale in the artifact, and proceeds.
+
+See [`.cursor/qrspi/AUTONOMOUS_MODE.md`](.cursor/qrspi/AUTONOMOUS_MODE.md).
+
+Autonomous QRSPI removes process approval waits. It does not permit agents to complete product learning checkpoints or remove `TODO: Human Hands-On Implementation` blocks.
+
+### Context Isolation
+
+Each stage runs in fresh context and receives only its allowed artifact inputs. Disk artifacts under `thoughts/qrspi/` are the API between stages.
+
+See [`.cursor/qrspi/CONTEXT_ISOLATION.md`](.cursor/qrspi/CONTEXT_ISOLATION.md).
+
+### Product Learning Checkpoints Are Not Automated
+
+Agents may scaffold, document, validate contracts, and add tests around Human-in-the-Loop checkpoints. Agents must never complete a block marked:
+
+    TODO: Human Hands-On Implementation
+
+For Checkpoint #1, `app/proxy/interceptor.py` remains `blocked_on_human` until the human fills the implementation.
+
+Separately from QRSPI gates, before a core pillar feature is auto-completed:
+
+1. Inject `TODO: Human Hands-On Implementation`
+2. Provide a 3-bullet cheat sheet
+3. Leave `NotImplementedError` (or equivalent) until the human implements
+4. Validate after human completion
 
 ---
 

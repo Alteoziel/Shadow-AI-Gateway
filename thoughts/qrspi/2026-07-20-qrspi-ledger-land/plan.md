@@ -52,12 +52,12 @@ Do not add implementation instructions for the gateway or change runtime command
 ### Verification
 
 #### Automated
-- [ ] `rg -n "THE LEDGER IS LAW|Ledger wins|wins if instructions conflict|QRSPI|\\.cursor/qrspi|thoughts/qrspi" architecture_and_roadmap.md README.md` shows Ledger precedence, mandatory QRSPI, playbook path, and artifact path.
-- [ ] `git diff -- app/proxy/interceptor.py` is empty.
+- [x] `rg -n "THE LEDGER IS LAW|Ledger wins|wins if instructions conflict|QRSPI|\\.cursor/qrspi|thoughts/qrspi" architecture_and_roadmap.md README.md` shows Ledger precedence, mandatory QRSPI, playbook path, and artifact path.
+- [x] `git diff -- app/proxy/interceptor.py` is empty.
 
 #### Manual
-- [ ] Starting from `README.md`, a reader can identify `architecture_and_roadmap.md` as the conflict winner and `.cursor/qrspi/` as the required workflow.
-- [ ] Starting from `architecture_and_roadmap.md`, a reader sees that QRSPI autonomy does not override human product checkpoints.
+- [x] Starting from `README.md`, a reader can identify `architecture_and_roadmap.md` as the conflict winner and `.cursor/qrspi/` as the required workflow. — autonomous: verified via rg output above
+- [x] Starting from `architecture_and_roadmap.md`, a reader sees that QRSPI autonomy does not override human product checkpoints. — autonomous: verified via banner text in rg output
 
 ---
 
@@ -123,12 +123,12 @@ If nesting fenced code blocks becomes awkward, use an indented text block for th
 ### Verification
 
 #### Automated
-- [ ] `rg -n "Operational Protocol.*QRSPI|Question|Research|Design|Structure|Plan|Worktree|Implement|PR|Autonomous QRSPI|Context Isolation|AUTONOMOUS_MODE|CONTEXT_ISOLATION|TODO: Human Hands-On Implementation" architecture_and_roadmap.md` confirms the full stage chain, autonomy rule, isolation rule, and checkpoint boundary.
-- [ ] `git diff -- app/proxy/interceptor.py app/api/v1/chat.py tests/test_interceptor_contract.py tests/test_proxy_routing.py` is empty.
+- [x] `rg -n "Operational Protocol.*QRSPI|Question|Research|Design|Structure|Plan|Worktree|Implement|PR|Autonomous QRSPI|Context Isolation|AUTONOMOUS_MODE|CONTEXT_ISOLATION|TODO: Human Hands-On Implementation" architecture_and_roadmap.md` confirms the full stage chain, autonomy rule, isolation rule, and checkpoint boundary.
+- [x] `git diff -- app/proxy/interceptor.py app/api/v1/chat.py tests/test_interceptor_contract.py tests/test_proxy_routing.py` is empty.
 
 #### Manual
-- [ ] Ledger §5 reads as the complete task workflow for future development.
-- [ ] The section explicitly says process approval waits are removed while product checkpoint TODOs remain human-owned.
+- [x] Ledger §5 reads as the complete task workflow for future development. — autonomous: verified via section 5 table and subsections
+- [x] The section explicitly says process approval waits are removed while product checkpoint TODOs remain human-owned. — autonomous: verified via Autonomous QRSPI and Product Learning Checkpoints subsections
 
 ---
 
