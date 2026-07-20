@@ -168,7 +168,7 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 |-------|-------|
 | **Status** | `not_started` |
 | **Checkpoint status** | `not_started` |
-| **Checkpoint file** | TBD — core string substitution / regex-NLP scrubbing loop |
+| **Checkpoint file** | `app/scrub/pipeline.py` — core string substitution / regex-NLP scrubbing loop |
 | **Owner (checkpoint)** | Human |
 
 **What we build:** Pre-forward inspection: string flags (API keys, credit cards) + lightweight local NLP (spaCy or high-performance regex) to redact names/corporate terms as tokens like `[REDACTED_NAME]`. **Latency budget: sub-100ms.**
@@ -218,7 +218,7 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 | Phase | Name | Checkpoint file | Checkpoint owner | Phase status | Checkpoint status |
 |-------|------|-----------------|------------------|--------------|-------------------|
 | 1 | Crawl — Async Proxy | `app/proxy/interceptor.py` | Human | `in_progress` | `blocked_on_human` |
-| 2 | Walk — Scrubbing | TBD | Human | `not_started` | `not_started` |
+| 2 | Walk — Scrubbing | `app/scrub/pipeline.py` | Human | `not_started` | `not_started` |
 | 3 | Run — Postgres Audit | TBD | Human | `not_started` | `not_started` |
 | 4 | Cloud — Docker + Terraform | TBD | Human | `not_started` | `not_started` |
 
@@ -371,7 +371,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | Resume claim | Phase | Human-owned artifact |
 |--------------|-------|----------------------|
 | Async enterprise API proxy / pre-flight intercept | 1 | `app/proxy/interceptor.py` |
-| Localized PII scrubbing pipeline (&lt;100ms) | 2 | Scrubbing loop (TBD path) |
+| Localized PII scrubbing pipeline (&lt;100ms) | 2 | `app/scrub/pipeline.py` |
 | PostgreSQL metrics & audit trails | 3 | Schema + insert path (TBD) |
 | Docker + Terraform private cloud hosting | 4 | `Dockerfile` + `main.tf` (TBD) |
 
