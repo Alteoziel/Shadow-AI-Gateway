@@ -1,10 +1,9 @@
 import httpx
 import pytest
-from fastapi import HTTPException
-
 from app.config import Settings
 from app.proxy.providers.anthropic import AnthropicProvider
 from app.proxy.providers.openai import OpenAIProvider
+from fastapi import HTTPException
 
 OPENAI_PAYLOAD = {
     "model": "gpt-4o-mini",

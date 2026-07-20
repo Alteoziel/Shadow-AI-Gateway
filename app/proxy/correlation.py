@@ -1,6 +1,6 @@
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
-import re
 from uuid import uuid4
 
 CORRELATION_ID_HEADER = "X-Correlation-ID"
@@ -12,7 +12,7 @@ def generate_correlation_id() -> str:
 
 
 def parse_correlation_id(headers: Mapping[str, str] | None) -> str:
-    if headers is None:
+    if headers is None or not isinstance(headers, Mapping):
         return generate_correlation_id()
 
     raw_value = headers.get(CORRELATION_ID_HEADER)

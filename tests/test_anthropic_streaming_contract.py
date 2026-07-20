@@ -1,6 +1,5 @@
 import httpx
 import pytest
-
 from app.proxy.streaming import relay_sse_stream
 
 
