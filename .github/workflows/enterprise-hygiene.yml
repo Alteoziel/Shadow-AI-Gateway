@@ -91,6 +91,8 @@ jobs:
 
       - name: "C · Semgrep"
         run: |
+          # setuptools provides pkg_resources; pin Semgrep for reproducible SAST
+          python -m pip install -U "setuptools>=75" "wheel"
           pip install "semgrep==1.110.0"
           # Custom rules — hard fail
           semgrep scan \
