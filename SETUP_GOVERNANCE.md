@@ -62,8 +62,12 @@ Pick a long random string (password manager / `openssl rand -hex 32`). You will 
 2. **Import** `Alteoziel/Shadow-AI-Gateway` (your GitHub repo)
 3. Project name: e.g. `shadow-ai-governance` (anything except the old sellable-saas templates)
 4. **Root Directory** → click Edit → set to **`dashboard`** → Continue
-5. Framework Preset should detect **Next.js**
-6. Do **not** deploy yet — first add env + Redis (next steps), or deploy then add and redeploy
+5. Framework Preset must be **Next.js** (not Other / Vite / Create React App)
+6. **Output Directory** must be **empty / default** — leave it blank.  
+   Do **not** set it to `public` (that causes: `No Output Directory named "public" found`).
+7. Do **not** deploy yet — first add env + Redis (next steps), or deploy then add and redeploy
+
+If you already hit the `public` error: Project → **Settings → General → Build & Development Settings** → clear **Output Directory** → set Framework to **Next.js** → confirm **Root Directory** is `dashboard` → **Redeploy**.
 
 ### 4c. Add Upstash Redis (required on Vercel)
 
@@ -97,8 +101,10 @@ GitHub repo → **Settings → Secrets and variables → Actions**:
 
 | Secret | Value |
 |--------|-------|
-| `GOVERNANCE_DASHBOARD_URL` | `https://your-dashboard.vercel.app` (no trailing slash) |
-| `GOVERNANCE_DASHBOARD_SECRET` | **Same** string as Vercel |
+| `GOVERNANCE_DASHBOARD_URL` | Your **real** Production URL from Vercel (Domains), e.g. `https://shadow-ai-governance.vercel.app` — **not** the literal text `https://your-app.vercel.app`. No trailing slash. |
+| `GOVERNANCE_DASHBOARD_SECRET` | **Same** string as the Vercel env var `GOVERNANCE_DASHBOARD_SECRET` |
+
+Secret **names** are correct as repository secrets under Actions. Only the URL value must be the live domain after a successful deploy.
 
 ### 4f. Take a quiz (end-to-end)
 
@@ -110,6 +116,8 @@ GitHub repo → **Settings → Secrets and variables → Actions**:
 6. Read the study guide → take the quiz (≥80%) → Approve / Merge unlocks
 
 If the list is empty: CI could not POST (wrong URL/secret), or Redis is missing. Check the Actions log for dashboard POST soft-fail messages, and the Vercel function logs for Redis errors.
+
+If the site returns **500 / Application error**: open `/api/health` on the same host. You should see JSON with `"ok": true`. Then check Deployment → Logs. Usual causes: Redis not linked to **Preview** (only Production), or an old deploy writing to a read-only path. Redeploy after connecting Upstash to both environments.
 
 ### Local alternative (no Vercel)
 

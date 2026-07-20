@@ -3,12 +3,16 @@ import {
   authorizeReviewer,
   unauthorizedResponse,
 } from "@/lib/auth";
+import { buildPullMergeUrl } from "@/lib/github";
 import {
   getReview,
   updateReview,
   gradeComprehension,
   sanitizeReviewForClient,
 } from "@/lib/store";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -155,18 +159,18 @@ export async function POST(req: NextRequest, { params }: Params) {
         { status: 400 }
       );
     }
-    if (!review.repo || !review.pr_number) {
+    const mergeTarget = buildPullMergeUrl(review.repo, review.pr_number);
+    if ("error" in mergeTarget) {
       return NextResponse.json(
         {
           error: "missing_pr_metadata",
-          message: "Review has no repo/PR number.",
+          message: mergeTarget.error,
         },
         { status: 400 }
       );
     }
 
-    const mergeUrl = `https://api.github.com/repos/${review.repo}/pulls/${review.pr_number}/merge`;
-    const mergeResp = await fetch(mergeUrl, {
+    const mergeResp = await fetch(mergeTarget.url, {
       method: "PUT",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -174,7 +178,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        commit_title: `Merge PR #${review.pr_number} via AI Governance Panel`,
+        commit_title: `Merge PR #${mergeTarget.pr} via AI Governance Panel`,
         merge_method: "squash",
       }),
     });

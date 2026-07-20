@@ -1,16 +1,15 @@
 /**
  * Lightweight review store.
  *
- * - Local / single-instance: JSON file under `.data/`
- * - Vercel / serverless: Upstash Redis (set via Vercel Marketplace → Upstash)
+ * - Preferred: Upstash Redis / Vercel KV (durable on serverless)
+ * - Fallback (local/dev): in-process memory
  *
- * Redis is required on Vercel — the serverless filesystem is ephemeral and
- * not shared across invocations, so `.data/reviews.json` cannot hold quizzes.
+ * Intentionally avoids filesystem persistence. Writing HTTP request bodies to
+ * disk (and later reading them into outbound fetch calls) is the pattern
+ * CodeQL flags as js/http-to-file-access and js/file-access-to-http.
  */
 
 import { createHash } from "crypto";
-import { promises as fs } from "fs";
-import path from "path";
 import { Redis } from "@upstash/redis";
 
 export type Severity = "info" | "warning" | "error" | "critical";
@@ -98,43 +97,72 @@ export type Review = {
   comprehension_fingerprint?: string | null;
 };
 
-const DATA_DIR = path.join(process.cwd(), ".data");
-const STORE_PATH = path.join(DATA_DIR, "reviews.json");
+export type StoreStatus = {
+  backend: "redis" | "memory";
+  durable: boolean;
+  warning: string | null;
+};
+
 const REDIS_KEY = "governance:reviews";
 
+/** Process-local fallback when Redis is not configured (dev / single instance). */
+let memoryReviews: Review[] = [];
+
+function isVercel(): boolean {
+  return Boolean(process.env.VERCEL);
+}
+
 function redisClient(): Redis | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  const url = (
+    process.env.UPSTASH_REDIS_REST_URL ||
+    process.env.KV_REST_API_URL ||
+    ""
+  ).trim();
+  const token = (
+    process.env.UPSTASH_REDIS_REST_TOKEN ||
+    process.env.KV_REST_API_TOKEN ||
+    ""
+  ).trim();
   if (!url || !token) return null;
   return new Redis({ url, token });
 }
 
-function assertServerlessStoreReady(): void {
-  // On Vercel, file storage will silently lose quiz data across lambdas.
-  if (process.env.VERCEL && !redisClient()) {
-    throw new Error(
-      "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required on Vercel. " +
-        "Add Upstash Redis from the Vercel Marketplace (Storage tab), then redeploy."
-    );
+export function getStoreStatus(): StoreStatus {
+  if (redisClient()) {
+    return { backend: "redis", durable: true, warning: null };
   }
+  if (isVercel()) {
+    return {
+      backend: "memory",
+      durable: false,
+      warning:
+        "Running on Vercel without Upstash Redis. Reviews stay in process memory and will not survive across serverless instances. Add Upstash Redis (Storage tab) and set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_*), then redeploy.",
+    };
+  }
+  return {
+    backend: "memory",
+    durable: false,
+    warning:
+      "Using in-memory store (local). Data resets when the process restarts. For durable quizzes on Vercel, attach Upstash Redis.",
+  };
 }
 
 async function readReviews(): Promise<Review[]> {
   const redis = redisClient();
   if (redis) {
-    const data = await redis.get<Review[]>(REDIS_KEY);
-    return Array.isArray(data) ? data : [];
-  }
-
-  assertServerlessStoreReady();
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
-    return JSON.parse(raw) as Review[];
-  } catch {
-    await fs.writeFile(STORE_PATH, "[]", "utf8");
+    const data = await redis.get<Review[] | string>(REDIS_KEY);
+    if (Array.isArray(data)) return data;
+    if (typeof data === "string") {
+      try {
+        const parsed = JSON.parse(data) as Review[];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
     return [];
   }
+  return memoryReviews;
 }
 
 async function writeReviews(reviews: Review[]): Promise<void> {
@@ -143,10 +171,7 @@ async function writeReviews(reviews: Review[]): Promise<void> {
     await redis.set(REDIS_KEY, reviews);
     return;
   }
-
-  assertServerlessStoreReady();
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(STORE_PATH, JSON.stringify(reviews, null, 2), "utf8");
+  memoryReviews = reviews;
 }
 
 export function extractComprehension(
@@ -203,7 +228,7 @@ export function sanitizeReviewForClient(review: Review): Review {
     comprehension: publicComprehension(
       review.comprehension
     ) as Review["comprehension"],
-    steps: sanitizeStepsForClient(review.steps),
+    steps: sanitizeStepsForClient(review.steps ?? []),
   };
 }
 
@@ -229,13 +254,23 @@ export function gradeComprehension(
 }
 
 export async function listReviews(): Promise<Review[]> {
-  const reviews = await readReviews();
-  return reviews.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  try {
+    const reviews = await readReviews();
+    return reviews.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  } catch (err) {
+    console.error("[governance-store] listReviews failed", err);
+    return [];
+  }
 }
 
 export async function getReview(id: string): Promise<Review | null> {
-  const reviews = await readReviews();
-  return reviews.find((r) => r.id === id) ?? null;
+  try {
+    const reviews = await readReviews();
+    return reviews.find((r) => r.id === id) ?? null;
+  } catch (err) {
+    console.error("[governance-store] getReview failed", err);
+    return null;
+  }
 }
 
 export async function upsertReview(
@@ -247,10 +282,8 @@ export async function upsertReview(
   const now = new Date().toISOString();
   const comprehension = extractComprehension(payload.steps);
   const fingerprint = comprehensionFingerprint(comprehension);
-  // Always require comprehension when a pack exists; if missing, stay pending_comprehension
   const initialStatus: ReviewStatus =
-    payload.status ??
-    (comprehension ? "pending_comprehension" : "pending_comprehension");
+    payload.status ?? "pending_comprehension";
 
   const existingIdx = reviews.findIndex(
     (r) =>
@@ -279,10 +312,8 @@ export async function upsertReview(
     } else if (prev.status === "merged") {
       nextStatus = "merged";
     } else if (!sameQuiz) {
-      // New/changed quiz pack from CI → require comprehension again
       nextStatus = "pending_comprehension";
     } else if (prev.status === "approved" || prev.status === "rejected") {
-      // Same quiz — do not clobber a human decision on CI re-ingest
       nextStatus = prev.status;
     } else {
       nextStatus = keepPass ? "pending_review" : "pending_comprehension";
@@ -293,7 +324,6 @@ export async function upsertReview(
       ...payload,
       comprehension,
       comprehension_fingerprint: fingerprint,
-      // Reset quiz whenever the question pack changes (even on same commit / CI re-run)
       comprehension_passed: keepPass,
       comprehension_attempt: keepPass ? prev.comprehension_attempt : null,
       status: nextStatus,
