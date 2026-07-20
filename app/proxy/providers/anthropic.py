@@ -5,6 +5,8 @@ import httpx
 from app.config import Settings
 from app.proxy.payloads import to_anthropic_payload
 from app.proxy.providers.base import BaseLLMProvider
+from app.security.egress import assert_allowed_url
+from app.security.http import EgressCheckedAsyncClient
 
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -15,7 +17,8 @@ class AnthropicProvider(BaseLLMProvider):
 
     def __init__(self, settings: Settings) -> None:
         self._api_key = settings.anthropic_api_key
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+        self._client = EgressCheckedAsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+        assert_allowed_url(ANTHROPIC_MESSAGES_URL)
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -25,6 +28,7 @@ class AnthropicProvider(BaseLLMProvider):
         }
 
     async def chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        assert_allowed_url(ANTHROPIC_MESSAGES_URL)
         anthropic_payload = to_anthropic_payload(payload)
         response = await self._client.post(
             ANTHROPIC_MESSAGES_URL,
@@ -39,6 +43,7 @@ class AnthropicProvider(BaseLLMProvider):
         self,
         payload: dict[str, Any],
     ) -> httpx.Response:
+        assert_allowed_url(ANTHROPIC_MESSAGES_URL)
         anthropic_payload = {
             **to_anthropic_payload(payload),
             "stream": True,

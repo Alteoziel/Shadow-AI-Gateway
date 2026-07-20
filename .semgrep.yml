@@ -1,0 +1,75 @@
+# Semgrep rules — Layer C (beyond regex OWASP)
+# Custom rules AND registry packs hard-fail on ERROR in CI.
+
+rules:
+  - id: shadow-ai.no-hardcoded-provider-keys
+    languages: [python]
+    severity: ERROR
+    message: Hardcoded LLM provider API key detected. Use environment variables.
+    patterns:
+      - pattern-either:
+          - pattern-regex: (?i)(openai|anthropic|llm|api)[_-]?key\s*=\s*["']sk-[A-Za-z0-9_\-]{10,}["']
+          - pattern-regex: (?i)(openai|anthropic)[_-]?api[_-]?key\s*=\s*["'][^"']{12,}["']
+          - pattern: OPENAI_API_KEY = "..."
+          - pattern: ANTHROPIC_API_KEY = "..."
+    paths:
+      exclude:
+        - "**/tests/**"
+        - "**/governance/tests/**"
+
+  - id: shadow-ai.interceptor-must-be-awaited
+    languages: [python]
+    severity: ERROR
+    message: Call intercept_outbound_request with await (async choke point).
+    patterns:
+      - pattern: intercept_outbound_request(...)
+      - pattern-not-inside: |
+          await intercept_outbound_request(...)
+    paths:
+      include:
+        - "**/app/**"
+
+  - id: shadow-ai.no-shell-true
+    languages: [python]
+    severity: ERROR
+    message: subprocess with shell=True is forbidden in the gateway.
+    pattern: subprocess.$FN(..., shell=True, ...)
+    paths:
+      include:
+        - "**/app/**"
+
+  - id: shadow-ai.no-os-system
+    languages: [python]
+    severity: ERROR
+    message: os.system is forbidden in the gateway — use subprocess without shell.
+    pattern: os.system(...)
+    paths:
+      include:
+        - "**/app/**"
+
+  - id: shadow-ai.no-pickle-loads
+    languages: [python]
+    severity: ERROR
+    message: pickle.loads/load is forbidden (RCE risk). Use JSON or typed parsers.
+    patterns:
+      - pattern-either:
+          - pattern: pickle.loads(...)
+          - pattern: pickle.load(...)
+          - pattern: pickle.Unpickler(...)
+    paths:
+      include:
+        - "**/app/**"
+
+  - id: shadow-ai.no-bare-httpx-async-client
+    languages: [python]
+    severity: ERROR
+    message: Use EgressCheckedAsyncClient instead of bare httpx.AsyncClient for outbound calls.
+    patterns:
+      - pattern: httpx.AsyncClient(...)
+      - pattern-not-inside: |
+          class EgressCheckedAsyncClient(...):
+              ...
+    paths:
+      include:
+        - "**/app/proxy/**"
+        - "**/app/api/**"

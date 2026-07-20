@@ -4,12 +4,18 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000
 
 COPY pyproject.toml README.md ./
 COPY app ./app
 
-RUN pip install --upgrade pip && pip install .
+RUN pip install --upgrade pip \
+    && pip install . \
+    && useradd --create-home --uid 10001 --shell /usr/sbin/nologin gateway \
+    && chown -R gateway:gateway /app
+
+USER gateway
 
 EXPOSE 8000
 
