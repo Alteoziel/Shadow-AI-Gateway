@@ -119,6 +119,7 @@ CATEGORY_LABELS = {
     "manual_tasks": "Manual things you must do",
     "functions": "Functions & call flow",
     "security": "Security implications",
+    "coding_problem": "Coding problem (from this PR)",
 }
 
 
@@ -343,7 +344,9 @@ def _build_deterministic_pack(
         "diff_chars": len(diff_text or ""),
     }
 
-    questions = _make_questions(study_guide, all_fns, all_imports)
+    questions = _make_questions(
+        study_guide, all_fns, all_imports, paths=paths, root=root
+    )
     return {
         "learner_level": "absolute_beginner",
         "pass_threshold": PASS_THRESHOLD,
@@ -360,6 +363,8 @@ def _q(
     choices: list[str],
     answer_index: int,
     explanation: str,
+    *,
+    format: str = "text",
 ) -> dict[str, Any]:
     return {
         "id": qid,
@@ -369,13 +374,346 @@ def _q(
         "choices": choices,
         "answer_index": answer_index,
         "explanation": explanation,
+        "format": format,
     }
+
+
+def _truncate_code(text: str, limit: int = 700) -> str:
+    text = text.strip("\n")
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n# ..."
+
+
+def _return_expressions(source: str, fn_node: ast.AST) -> list[str]:
+    """Collect return expression source snippets (kept shallow for AST guardrail)."""
+    out: list[str] = []
+    for child in ast.walk(fn_node):
+        if isinstance(child, ast.Return) and child.value is not None:
+            piece = ast.get_source_segment(source, child.value)
+            if piece:
+                out.append(piece.strip())
+            if len(out) >= 4:
+                break
+    return out
+
+
+def _snippet_from_function(
+    source: str, rel: str, node: ast.FunctionDef | ast.AsyncFunctionDef
+) -> dict[str, Any] | None:
+    seg = ast.get_source_segment(source, node) or ""
+    if len(seg.strip()) < 20:
+        return None
+    args = [a.arg for a in node.args.args if a.arg != "self"]
+    return {
+        "file": rel,
+        "name": node.name,
+        "async": isinstance(node, ast.AsyncFunctionDef),
+        "args": args,
+        "source": _truncate_code(seg),
+        "returns": _return_expressions(source, node),
+        "doc": ast.get_docstring(node) or "",
+    }
+
+
+def _extract_python_snippets(
+    paths: list[Path], *, root: Path | None, limit: int = 8
+) -> list[dict[str, Any]]:
+    """Pull real callables from the PR so coding questions are about this diff."""
+    snippets: list[dict[str, Any]] = []
+    py_paths = [p for p in paths if p.is_file() and p.suffix == ".py"]
+    for path in py_paths:
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (OSError, SyntaxError):
+            continue
+        rel = _rel(path, root)
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            snip = _snippet_from_function(source, rel, node)
+            if snip is None:
+                continue
+            snippets.append(snip)
+            if len(snippets) >= limit:
+                return snippets
+    return snippets
+
+
+def _coding_challenge(
+    *,
+    qid: str,
+    prompt: str,
+    starter_code: str,
+    entrypoint: str,
+    tests: list[dict[str, Any]],
+    explanation: str,
+) -> dict[str, Any]:
+    """Interactive coding challenge (write code in the dashboard editor)."""
+    return {
+        "id": qid,
+        "question_type": "coding",
+        "category": "coding_problem",
+        "category_label": CATEGORY_LABELS["coding_problem"],
+        "prompt": prompt,
+        "language": "javascript",
+        "starter_code": starter_code,
+        "entrypoint": entrypoint,
+        "tests": tests,
+        "choices": [],
+        "answer_index": -1,
+        "explanation": explanation,
+        "format": "code",
+    }
+
+
+def _make_coding_questions(
+    paths: list[Path],
+    *,
+    root: Path | None,
+    all_fns: list[tuple[str, dict]],
+) -> list[dict[str, Any]]:
+    """Emit ≥2 short coding challenges the learner must solve in an editor.
+
+    Challenges are JavaScript so the dashboard can run/grade them safely in the
+    browser and again on the server (node:vm). Prompts are tied to this PR's
+    files/concepts when possible.
+    """
+    rels = [_rel(p, root).replace("\\", "/") for p in paths if p.is_file()]
+    joined = " ".join(rels).lower()
+    snippets = _extract_python_snippets(paths, root=root)
+    questions: list[dict[str, Any]] = []
+
+    # --- Challenge pool (pick PR-relevant ones first) ---
+    pool: list[dict[str, Any]] = []
+
+    if any("github" in r for r in rels) or "quiz" in joined or "governance" in joined:
+        pool.append(
+            _coding_challenge(
+                qid="code_ch_parse_repo",
+                prompt=(
+                    "**Coding challenge — GitHub repo ref (this PR’s governance check).**\n\n"
+                    "Implement `parseOwnerRepo(repo)`.\n"
+                    "- Input is a string like `\"Alteoziel/Shadow-AI-Gateway\"`.\n"
+                    "- If valid `owner/name` (letters, numbers, `_`, `.`, `-`), "
+                    "return `{ owner, name, full }` where `full` is `owner/name`.\n"
+                    "- Otherwise return `null`.\n"
+                    "- Trim whitespace. Reject empty parts or extra `/` segments."
+                ),
+                starter_code=(
+                    "function parseOwnerRepo(repo) {\n"
+                    "  // TODO: implement\n"
+                    "}\n"
+                ),
+                entrypoint="parseOwnerRepo",
+                tests=[
+                    {
+                        "id": "t1",
+                        "args": ["Alteoziel/Shadow-AI-Gateway"],
+                        "expected": {
+                            "owner": "Alteoziel",
+                            "name": "Shadow-AI-Gateway",
+                            "full": "Alteoziel/Shadow-AI-Gateway",
+                        },
+                    },
+                    {"id": "t2", "args": ["  a/b  "], "expected": {"owner": "a", "name": "b", "full": "a/b"}},
+                    {"id": "t3", "args": ["nope"], "expected": None},
+                    {"id": "t4", "args": ["a/b/c"], "expected": None},
+                    {"id": "t5", "args": [""], "expected": None},
+                ],
+                explanation=(
+                    "Same rules as `parseGithubRepo` in the dashboard — validate before "
+                    "building GitHub API URLs."
+                ),
+            )
+        )
+
+    pool.append(
+        _coding_challenge(
+            qid="code_ch_quiz_score",
+            prompt=(
+                "**Coding challenge — comprehension scoring.**\n\n"
+                "Implement `quizPassed(correct, total, threshold)`.\n"
+                "- `correct` and `total` are non-negative integers; `threshold` is 0–1 "
+                "(e.g. `0.8`).\n"
+                "- Return `true` iff `total > 0` and `(correct / total) >= threshold`.\n"
+                "- If `total === 0`, return `false`."
+            ),
+            starter_code=(
+                "function quizPassed(correct, total, threshold) {\n"
+                "  // TODO: implement\n"
+                "}\n"
+            ),
+            entrypoint="quizPassed",
+            tests=[
+                {"id": "t1", "args": [8, 10, 0.8], "expected": True},
+                {"id": "t2", "args": [7, 10, 0.8], "expected": False},
+                {"id": "t3", "args": [0, 0, 0.8], "expected": False},
+                {"id": "t4", "args": [4, 5, 0.8], "expected": True},
+                {"id": "t5", "args": [1, 2, 0.5], "expected": True},
+            ],
+            explanation="Matches the dashboard Step 6 pass rule (≥ threshold).",
+        )
+    )
+
+    pool.append(
+        _coding_challenge(
+            qid="code_ch_normalize_messages",
+            prompt=(
+                "**Coding challenge — gateway request shape.**\n\n"
+                "Implement `normalizeMessages(body)` for chat payloads:\n"
+                "- Read `body.messages`.\n"
+                "- If missing/undefined/null, treat as `[]`.\n"
+                "- If it is not an array, throw `Error` with message "
+                "`messages must be a list`.\n"
+                "- Otherwise return a **new** object: all keys from `body`, with "
+                "`messages` set to that array (do not mutate the input)."
+            ),
+            starter_code=(
+                "function normalizeMessages(body) {\n"
+                "  // TODO: implement\n"
+                "}\n"
+            ),
+            entrypoint="normalizeMessages",
+            tests=[
+                {
+                    "id": "t1",
+                    "args": [{"model": "x", "messages": [{"role": "user"}]}],
+                    "expected": {"model": "x", "messages": [{"role": "user"}]},
+                },
+                {
+                    "id": "t2",
+                    "args": [{"model": "x"}],
+                    "expected": {"model": "x", "messages": []},
+                },
+                {
+                    "id": "t3",
+                    "args": [{"messages": "oops"}],
+                    "raises": "Error",
+                },
+            ],
+            explanation=(
+                "Same pre-flight discipline as the gateway interceptor — validate "
+                "before upstream calls."
+            ),
+        )
+    )
+
+    pool.append(
+        _coding_challenge(
+            qid="code_ch_quiz_status",
+            prompt=(
+                "**Coding challenge — Governance Quiz commit status.**\n\n"
+                "Implement `quizCommitState(comprehensionPassed)` used when CI/dashboard "
+                "updates the GitHub check:\n"
+                "- If `comprehensionPassed` is strictly `true`, return `\"success\"`.\n"
+                "- Otherwise return `\"pending\"`."
+            ),
+            starter_code=(
+                "function quizCommitState(comprehensionPassed) {\n"
+                "  // TODO: implement\n"
+                "}\n"
+            ),
+            entrypoint="quizCommitState",
+            tests=[
+                {"id": "t1", "args": [True], "expected": "success"},
+                {"id": "t2", "args": [False], "expected": "pending"},
+                {"id": "t3", "args": [None], "expected": "pending"},
+            ],
+            explanation="CI opens the check as pending; a passed quiz flips it to success.",
+        )
+    )
+
+    if any("ast" in r or "comprehension" in r for r in rels) or snippets:
+        pool.append(
+            _coding_challenge(
+                qid="code_ch_max_nest",
+                prompt=(
+                    "**Coding challenge — AST nested-loop depth.**\n\n"
+                    "Implement `maxNestDepth(depths)` where `depths` is an array of "
+                    "integers (loop nesting at various points).\n"
+                    "- Return the maximum value in the array.\n"
+                    "- If the array is empty, return `0`.\n\n"
+                    f"This PR’s governance AST rule fails when depth exceeds 2"
+                    + (
+                        f" — related files include `{snippets[0]['file']}`."
+                        if snippets
+                        else "."
+                    )
+                ),
+                starter_code=(
+                    "function maxNestDepth(depths) {\n"
+                    "  // TODO: implement\n"
+                    "}\n"
+                ),
+                entrypoint="maxNestDepth",
+                tests=[
+                    {"id": "t1", "args": [[1, 2, 3, 2]], "expected": 3},
+                    {"id": "t2", "args": [[]], "expected": 0},
+                    {"id": "t3", "args": [[1]], "expected": 1},
+                    {"id": "t4", "args": [[2, 2, 1]], "expected": 2},
+                ],
+                explanation="AST001 blocks merge when nested loop depth > 2.",
+            )
+        )
+
+    # Prefer challenges whose ids mention themes present in the PR; keep unique order
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _take(qid: str) -> None:
+        for q in pool:
+            if q["id"] == qid and qid not in seen:
+                selected.append(q)
+                seen.add(qid)
+                return
+
+    if any("github" in r for r in rels):
+        _take("code_ch_parse_repo")
+    if "quiz" in joined or "comprehension" in joined or "governance" in joined:
+        _take("code_ch_quiz_score")
+        _take("code_ch_quiz_status")
+    if any("proxy" in r or "interceptor" in r or "gateway" in r for r in rels):
+        _take("code_ch_normalize_messages")
+    if snippets or any("ast" in r or "comprehension" in r for r in rels):
+        _take("code_ch_max_nest")
+
+    for q in pool:
+        if len(selected) >= 2:
+            break
+        if q["id"] not in seen:
+            selected.append(q)
+            seen.add(q["id"])
+
+    # Always at least 2; if pool somehow tiny, duplicate-safe fill already handled
+    while len(selected) < 2 and pool:
+        for q in pool:
+            if q["id"] not in seen:
+                selected.append(q)
+                seen.add(q["id"])
+            if len(selected) >= 2:
+                break
+        break
+
+    # If PR is large, offer a third challenge when we have extras
+    if len(seen) < len(pool) and len(selected) == 2:
+        for q in pool:
+            if q["id"] not in seen:
+                selected.append(q)
+                break
+
+    assert len(selected) >= 2
+    return selected
 
 
 def _make_questions(
     guide: dict[str, Any],
     all_fns: list[tuple[str, dict]],
     imports: set[str],
+    *,
+    paths: list[Path] | None = None,
+    root: Path | None = None,
 ) -> list[dict[str, Any]]:
     questions: list[dict[str, Any]] = []
 
@@ -640,6 +978,11 @@ def _make_questions(
             1,
             "This quiz exists so 'human review' means informed review, not a blind click.",
         )
+    )
+
+    # Q11–Q12: coding problems grounded in this PR's code
+    questions.extend(
+        _make_coding_questions(paths or [], root=root, all_fns=all_fns)
     )
 
     return questions
