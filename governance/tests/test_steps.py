@@ -118,7 +118,10 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
         '"""tiny helper"""\n'
         "async def intercept_outbound_request(body):\n"
         '    """Pre-flight normalize."""\n'
-        "    return body\n",
+        "    return body\n"
+        "\n"
+        "def score_prompt(text: str) -> int:\n"
+        "    return len(text)\n",
         encoding="utf-8",
     )
     result = comprehension_gate.run(
@@ -127,7 +130,13 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
     assert result.passed
     pack = result.metrics["comprehension"]
     assert pack["pass_threshold"] == 0.8
-    assert len(pack["questions"]) >= 5
+    coding = [q for q in pack["questions"] if q.get("question_type") == "coding"]
+    assert len(coding) >= 2
+    for q in coding:
+        assert q["entrypoint"]
+        assert q["starter_code"]
+        assert q["tests"]
+        assert q["language"] == "javascript"
     assert pack["study_guide"]["glossary"]
     assert pack["study_guide"]["manual_dev_tasks"]
 
