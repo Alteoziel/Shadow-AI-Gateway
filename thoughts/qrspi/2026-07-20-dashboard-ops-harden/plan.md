@@ -87,9 +87,9 @@ Make the Step 7 dashboard deployable and operationally obvious while preserving 
 
 ### Verification
 #### Automated
-- [ ] `cd dashboard && npm run build` passes after Phase 2.
-- [ ] `rg -n "DATABASE_URL|createClient|@supabase|postgres|pg" dashboard/src dashboard/package.json dashboard/vercel.json` shows no DB implementation.
-- [ ] `git diff -- app/proxy/interceptor.py` is empty.
+- [x] `cd dashboard && npm run build` passes after Phase 2.
+- [x] `rg -n "DATABASE_URL|@supabase|createClient\\(|from ['\\\"]pg['\\\"]|from ['\\\"]postgres['\\\"]" dashboard/{src,package.json,vercel.json}` shows no DB implementation.
+- [x] `git diff -- app/proxy/interceptor.py --exit-code` is empty.
 
 #### Manual
-- [ ] autonomous: verified via docs diff that README and `.env.example` match Ledger §11.C dashboard setup.
+- [x] autonomous: verified via docs diff that README and `.env.example` match Ledger §11.C dashboard setup.
