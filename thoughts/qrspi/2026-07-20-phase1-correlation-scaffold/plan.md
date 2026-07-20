@@ -109,7 +109,7 @@ Add correlation ID helpers and FastAPI request logging around the existing Phase
 
 - [x] `python3 -m pytest` passes.
 - [x] `python3 - <<'PY' ...` source inspection confirms `intercept_outbound_request` still contains `NotImplementedError`.
-- [ ] `git push -u origin cursor/phase1-correlation-scaffold-5e0d` succeeds.
+- [x] `git push -u origin cursor/phase1-correlation-scaffold-5e0d` succeeds.
 
 #### Manual
 
