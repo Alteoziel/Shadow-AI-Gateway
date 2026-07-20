@@ -157,6 +157,37 @@ def test_security_hardcoded_secret(tmp_path: Path) -> None:
     assert any(f.rule_id == "SEC001_HARDCODED_SECRET" for f in result.findings)
 
 
+def test_security_ignores_semgrep_rule_yaml(tmp_path: Path) -> None:
+    """Rule definitions mention forbidden APIs — must not block the suite."""
+    rules = tmp_path / ".semgrep.yml"
+    # Split literals so the auditor does not flag this test file itself.
+    forbidden_shell = "os." + "system(...)"
+    forbidden_pickle = "pick" + "le.loads"
+    rules.write_text(
+        "rules:\n"
+        "  - id: demo\n"
+        f"    pattern: {forbidden_shell}\n"
+        f"    message: forbid {forbidden_pickle}\n",
+        encoding="utf-8",
+    )
+    result = security_auditor.run([rules], diff_text=None)
+    assert result.passed
+    assert result.findings == []
+
+
+def test_security_ssrf_requires_call_not_type_hint(tmp_path: Path) -> None:
+    src = tmp_path / "types.py"
+    src.write_text(
+        "import httpx\n"
+        "def handle(request: httpx.Request) -> None:\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    result = security_auditor.run([src], diff_text=None)
+    assert result.passed
+    assert not any(f.rule_id == "SEC005_SSRF" for f in result.findings)
+
+
 def test_big_o_estimator_linear() -> None:
     sizes = [10, 100, 1000, 10000]
     times = [s * 1e-6 for s in sizes]
@@ -208,7 +239,10 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
         '"""tiny helper"""\n'
         "async def intercept_outbound_request(body):\n"
         '    """Pre-flight normalize."""\n'
-        "    return body\n",
+        "    return body\n"
+        "\n"
+        "def score_prompt(text: str) -> int:\n"
+        "    return len(text)\n",
         encoding="utf-8",
     )
     result = comprehension_gate.run(
@@ -217,7 +251,13 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
     assert result.passed
     pack = result.metrics["comprehension"]
     assert pack["pass_threshold"] == 0.8
-    assert len(pack["questions"]) >= 5
+    coding = [q for q in pack["questions"] if q.get("question_type") == "coding"]
+    assert len(coding) >= 2
+    for q in coding:
+        assert q["entrypoint"]
+        assert q["starter_code"]
+        assert q["tests"]
+        assert q["language"] == "javascript"
     assert pack["study_guide"]["glossary"]
     assert pack["study_guide"]["manual_dev_tasks"]
     question_by_id = {q["id"]: q for q in pack["questions"]}

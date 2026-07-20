@@ -50,6 +50,13 @@ for case in BOUNDARY:
         results.append({"input": repr(case)[:80], "status": "ok"})
     except (TypeError, ValueError) as e:
         results.append({"input": repr(case)[:80], "status": "rejected", "error": str(e)})
+    except PermissionError as e:
+        # Expected deny path for allowlists / auth gates (e.g. EgressDeniedError).
+        results.append({
+            "input": repr(case)[:80],
+            "status": "denied",
+            "error": f"{type(e).__name__}: {e}",
+        })
     except Exception as e:
         results.append({
             "input": repr(case)[:80],
@@ -149,12 +156,14 @@ def run(paths: list[Path]) -> StepResult:
 
     Runs in a subprocess sandbox (Docker optional later). Crashes are ERRORS.
     TypeError / ValueError contract rejections are informational only.
+    PermissionError (and subclasses) are treated as expected deny paths.
     """
     findings: list[Finding] = []
     functions_tested = 0
     crashes = 0
     rejections = 0
     targets_tested: list[str] = []
+    denied = 0
 
     skip_markers = (
         "test_",
@@ -190,6 +199,9 @@ def run(paths: list[Path]) -> StepResult:
         crash_items = [
             item for item in outcome.get("results", []) if item.get("status") == "crash"
         ]
+        denied += sum(
+            1 for item in outcome.get("results", []) if item.get("status") == "denied"
+        )
         for item in crash_items:
             crashes += 1
             findings.append(
@@ -217,6 +229,7 @@ def run(paths: list[Path]) -> StepResult:
             "boundary_cases": len(BOUNDARY_CASES),
             "crashes": crashes,
             "rejections": rejections,
+            "denied": denied,
             "targets": targets_tested,
         },
     )

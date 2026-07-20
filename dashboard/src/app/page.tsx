@@ -6,13 +6,16 @@ import {
 } from "@/lib/auth";
 import {
   getReview,
+  getStoreStatus,
   listReviews,
   sanitizeReviewForClient,
   type Review,
+  type StoreStatus,
 } from "@/lib/store";
 import { ReviewDetail } from "@/components/ReviewPanel";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 type Props = {
   searchParams: Promise<{ id?: string }>;
@@ -36,7 +39,13 @@ function StatusPill({
   );
 }
 
-function SetupStatusPanel({ auth }: { auth: DashboardAuthStatus }) {
+function SetupStatusPanel({
+  auth,
+  storeStatus,
+}: {
+  auth: DashboardAuthStatus;
+  storeStatus: StoreStatus;
+}) {
   const ingestReady = auth.dashboardSecretConfigured || auth.insecureDevAllowed;
   const reviewerReady =
     auth.reviewerSecretConfigured || auth.dashboardSecretConfigured || auth.insecureDevAllowed;
@@ -95,8 +104,11 @@ function SetupStatusPanel({ auth }: { auth: DashboardAuthStatus }) {
         <div className="rounded-md bg-black/25 p-3">
           <dt className="font-semibold text-white">Store</dt>
           <dd>
-            JSON file <code>.data/reviews.json</code> is the default store. No
-            Supabase/Postgres migration is active in this step.
+            {storeStatus.backend === "redis"
+              ? "Using durable Upstash Redis."
+              : storeStatus.durable
+                ? "Using a durable store."
+                : "Using in-memory fallback storage; data resets when the process restarts."}
           </dd>
         </div>
         <div className="rounded-md bg-black/25 p-3">
@@ -115,13 +127,29 @@ function SetupStatusPanel({ auth }: { auth: DashboardAuthStatus }) {
 }
 
 export default async function HomePage({ searchParams }: Props) {
-  const { id } = await searchParams;
   const auth = dashboardAuthStatus();
-  const reviews = await listReviews();
-  const selectedRaw = id ? await getReview(id) : reviews[0] ?? null;
-  const selected = selectedRaw
-    ? sanitizeReviewForClient(selectedRaw)
-    : null;
+  let id: string | undefined;
+  try {
+    ({ id } = await searchParams);
+  } catch {
+    id = undefined;
+  }
+
+  let reviews: Review[] = [];
+  let selected: Review | null = null;
+  let loadError: string | null = null;
+  const storeStatus = getStoreStatus();
+
+  try {
+    reviews = await listReviews();
+    const selectedRaw = id ? await getReview(id) : reviews[0] ?? null;
+    selected = selectedRaw ? sanitizeReviewForClient(selectedRaw) : null;
+  } catch (err) {
+    loadError = err instanceof Error ? err.message : "Store unavailable";
+    console.error("[governance-dashboard] page load failed", err);
+  }
+
+  const banner = loadError || storeStatus.warning;
 
   return (
     <main>
@@ -139,7 +167,23 @@ export default async function HomePage({ searchParams }: Props) {
         </p>
       </header>
 
-      <SetupStatusPanel auth={auth} />
+      <SetupStatusPanel auth={auth} storeStatus={storeStatus} />
+
+      {banner ? (
+        <div
+          className="mb-8 rounded-xl border border-warn/40 bg-warn/10 p-6 text-sm text-mist"
+          role="alert"
+        >
+          <p className="font-semibold text-warn">Dashboard store notice</p>
+          <p className="mt-2">{banner}</p>
+          <p className="mt-3">
+            Vercel project → Storage → create Upstash Redis → connect to this
+            project → ensure env vars apply to Production and Preview →
+            Redeploy. Also set{" "}
+            <code className="text-white/80">GOVERNANCE_DASHBOARD_SECRET</code>.
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
         <aside className="space-y-3">
@@ -149,7 +193,14 @@ export default async function HomePage({ searchParams }: Props) {
           {reviews.length === 0 ? (
             <p className="text-sm text-mist">
               No reviews yet. CI will POST here when{" "}
-              <code>GOVERNANCE_DASHBOARD_URL</code> is set.
+              <code>GOVERNANCE_DASHBOARD_URL</code> is set to this deployment
+              URL and <code>GOVERNANCE_DASHBOARD_SECRET</code> matches the
+              Vercel env var exactly. A 401 in the Actions log means the
+              secrets do not match — fix them, then re-run{" "}
+              <strong className="font-semibold text-white">
+                Governance Steps 1–6
+              </strong>
+              .
             </p>
           ) : (
             <ul className="space-y-2">

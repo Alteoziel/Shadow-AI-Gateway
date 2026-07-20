@@ -1,84 +1,98 @@
 # Shadow AI Guardrail Gateway — Architecture & Roadmap
 
-> **THE LEDGER IS LAW** — Single source of truth for all agents, humans, and reviewers.
-> If repository instructions conflict, this Ledger wins. Read it before any developmental cycle.
-> Developmental work must follow QRSPI: `.cursor/qrspi/` playbooks, with artifacts under `thoughts/qrspi/`.
-> QRSPI autonomy does not authorize agents to complete Human-in-the-Loop product checkpoints.
+> ## THE LEDGER IS LAW
+>
+> This file is the **single source of truth** and the **binding constitution** for every
+> agent, subagent, reviewer, and human working in this repository.
+>
+> - If an instruction conflicts with The Ledger, **The Ledger wins**.
+> - If a model wants to "just quickly implement," **stop** and follow QRSPI + guardrails.
+> - If a Human Hands-On checkpoint is open, agents **must not** fill it.
+> - Read this file **before** any developmental cycle. Keep phase/checkpoint status current.
 
 **Last updated:** 2026-07-20  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
-**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (comprehension gate added)  
-**Task workflow:** QRSPI mandatory for developmental tasks; docs-only/process tasks still record artifacts when run through QRSPI.  
-**Phase 1 readiness envelope:** `in_progress` — nine QRSPI agent packages landed around Checkpoint #1 (providers, gateway CI, correlation scaffold, governance deepenings, dashboard ops, Phase 2 scrub stub). Checkpoint #1 remains human-owned.
+**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (required check on `main`)
+**Task workflow:** **QRSPI is mandatory** — see §5 and [`.cursor/qrspi/`](.cursor/qrspi/)
 
 ---
 
 ## 0. Pre-Merge Gate — AI Governance Engine (Steps 1–7)
 
-> **Why this exists before more gateway code ships:** Today the only automated checks on PRs are Vercel deployment status and Cursor Bugbot. Those do **not** enforce AST structure, OWASP patterns, boundary fuzzing, Big-O profiling, copyright similarity, or — critically — that **you understand the change**. This suite is the missing merge gate for `main`.
+> **Why this exists:** Vercel + Bugbot alone do **not** enforce AST structure, OWASP patterns,
+> fuzzing, Big-O, copyright, or that **you understand the change**. This suite is the merge gate.
 
-### What was added (2026-07-20)
+### What ships the gate
 
 | Piece | Path | Role |
 |-------|------|------|
 | Steps 1–6 CLI | `governance/` | Local + CI analysis suite (`ai-guardrail`) |
-| CI workflow | `.github/workflows/ai-guardrail.yml` | Runs on every PR → `main` |
-| Step 6 Comprehension | `governance/.../comprehension_gate.py` | Beginner study guide + quiz (blocks merge until passed) |
-| Step 7 dashboard | `dashboard/` | Human review + Approve/Merge via GitHub API |
+| CI workflow | `.github/workflows/ai-guardrail.yml` | Runs on every PR → `main` (check name: **Governance Steps 1–6**) |
+| Step 6 Comprehension | `governance/.../comprehension_gate.py` | Beginner study guide + quiz |
+| Step 7 dashboard | `dashboard/` | Human quiz + Approve/Merge via GitHub API |
 | Signature DB | `governance/governance/signatures/known_snippets.json` | Copyright fingerprints |
 
 ### The seven steps
 
-| # | Name | Implementation | Blocks merge? |
-|---|------|----------------|---------------|
-| 1 | AST Guardrail | `ast` node walk — nested loops, forbidden calls | Yes (error/critical) |
-| 2 | Security Auditor | Deterministic OWASP regex + optional LLM diff review | Yes (error/critical) |
-| 3 | Fuzz Chamber | Subprocess boundary injection (`null`, `[]`, huge payloads) | Yes (crashes) |
-| 4 | Benchmark Engine | Empirical timing at N=10…10k → Big-O slope | Informational (extensible) |
-| 5 | Copyright Filter | Rabin-Karp rolling hash + Levenshtein vs signatures | Yes (high similarity) |
-| 6 | **Comprehension Gate** | Beginner study guide + quiz (vocab, flow, deps, manual tasks, security) | **Yes — dashboard requires ≥80% before Approve/Merge** |
-| 7 | Human Review Panel | Next.js dashboard; merge webhook → GitHub REST | Human gate (after quiz) |
+| # | Name | Blocks merge? |
+|---|------|---------------|
+| 1 | AST Guardrail | Yes (error/critical) — **in Actions** |
+| 2 | Security Auditor | Yes (error/critical) — **in Actions** |
+| 3 | Fuzz Chamber | Yes (crashes) — **in Actions** |
+| 4 | Benchmark Engine | Informational — **in Actions** |
+| 5 | Copyright Filter | Yes (high similarity) — **in Actions** |
+| 6 | **Comprehension Gate** | Quiz **generated** in Actions; **human pass (≥80%) on dashboard / local CLI** before Approve & Merge |
+| 7 | Human Review Panel | Dashboard approve/merge (after quiz) |
 
-### Step 6 — why it exists (learning + safety)
+### How Step 6 (comprehension) is tracked
 
-You are very new to this stack. AI will write most of the boilerplate. **Rubber-stamping a PR you cannot explain is how secrets leak, bugs ship, and resume bullets become indefensible.**
+**GitHub Actions does not grade you.** The `Governance Steps 1–6` check:
 
-Step 6 forces a pause:
+1. Runs automated analysis (Steps 1–5)
+2. **Generates** the study guide + quiz for this PR’s diff (Step 6)
+3. Comments the report on the PR
+4. Goes ✅ green if generation succeeded and there are no blocking findings
 
-1. **Study guide** — plain-English pitch, bigger picture, glossary, key functions, dependencies, manual tasks, security notes
-2. **Quiz** — categories: vocabulary, how it works, architecture, dependencies, manual dev tasks, functions, security
-3. **Pass bar** — ≥80% on the dashboard (or `ai-guardrail quiz` locally to practice)
-4. **Only then** — Step 7 Approve / Approve & Merge unlocks
+**You prove understanding separately:**
 
-Tone: supportive teacher for a beginner, not a gotcha trap. Wrong answers show explanations so you learn.
+| Where | Command / action |
+|-------|------------------|
+| Local practice | `cd governance && ai-guardrail quiz --root .. --skip-llm` |
+| Dashboard (Step 7) | Deploy `dashboard/`, open it after CI POSTs the report → read guide → submit quiz (≥80%) → Approve & Merge unlocks |
+| GitHub check **`Governance Quiz`** | CI sets **pending**; dashboard sets **success** after ≥80% — require this under branch protection |
 
-### How Step 6 is tracked
+Until the dashboard is deployed (`GOVERNANCE_DASHBOARD_URL` + secrets), practice with the local `quiz` command. Branch protection should require both **`Governance Steps 1–6`** and **`Governance Quiz`**.
 
-The GitHub Actions status check is named `Governance Steps 1-6`. It runs the automated suite and verifies Step 6 quiz generation.
+### Agent preflight (before coding)
 
-Actions does not grade the human. The human comprehension pass happens in the dashboard before Step 7 Approve / Approve & Merge unlocks. Local practice is available with:
-
-```bash
-ai-guardrail quiz --root .. --skip-llm
-```
-
-The dashboard pass threshold is ≥80%.
-
-### Plan adjustments (vs original 6-step deep dive)
-
-1. **Python-first suite** (not a separate Node CLI) — matches the gateway stack and uses stdlib `ast` instead of Babel. The dashboard remains Next.js/TS as planned.
-2. **Governance is a parallel track**, not a 5th gateway phase — it gates *all* phases including Phase 1 checkpoint work.
-3. **LLM security review is optional** — deterministic OWASP rules always run (no secret required). Set `GOVERNANCE_LLM_API_KEY` / `OPENAI_API_KEY` to enable high-reasoning diff review.
-4. **Fuzz sandbox starts as subprocess**; Docker isolation is a later hardening (same crawl→run pattern as the gateway).
-5. **Dashboard storage starts as JSON file** (`.data/reviews.json`); migrate to Supabase Postgres when Phase 3 lands (same DB target — do not invent a parallel store).
-6. **Vercel is OK for the dashboard only** — still forbidden for the streaming proxy (§8).
-7. **Bugbot + Vercel remain** — governance is additive, not a replacement.
-8. **Comprehension Gate inserted before human review** — original "Step 6 review panel" is now Step 7. Blind human review without understanding is treated as a first-class risk.
-
+1. Read this Ledger (§§0–2, §5, §8 at minimum).
+2. Read [`.cursor/qrspi/README.md`](.cursor/qrspi/README.md), [`AUTONOMOUS_MODE.md`](.cursor/qrspi/AUTONOMOUS_MODE.md), [`CONTEXT_ISOLATION.md`](.cursor/qrspi/CONTEXT_ISOLATION.md).
+3. Run **QRSPI** with **fresh subagents per stage** and file allowlists.
+4. Never complete `TODO: Human Hands-On Implementation` blocks.
 ### Required human setup (for the gate to actually protect `main`)
 
-See **§11 Setup Checklist** below. Until branch protection requires the `Governance Steps 1–6` check, PRs can still merge without it.
+See **§11 Setup Checklist** below. Require status checks:
+
+- **`Governance Steps 1–6`**
+- **`Governance Quiz`** (dashboard flips pending → success after ≥80%)
+- **`Enterprise Layers B–E`** (Dependabot/gitleaks/ruff/mypy/semgrep/tests/trivy/checkov — see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md))
+- **`CodeQL (Layer C)`** after it appears once
+
+Protect Main ruleset should include **`Governance Quiz`** once it has appeared on a PR (GitHub only lists checks that have run at least once). Remaining operator steps (secret push protection, signed commits, second reviewer, etc.) are listed in [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
+
+---
+
+## 0b. Enterprise Layers B–E (additive)
+
+| Layer | Focus | Automations in repo |
+|-------|-------|---------------------|
+| B | Supply chain & secrets | Dependabot, checksummed Gitleaks, pip-audit, npm audit (high+ hard-fail) |
+| C | Static analysis | Ruff, Mypy, Semgrep (custom + ERROR packs), CodeQL Advanced (`codeql.yml`, security-extended upload), CODEOWNERS |
+| D | Product tests | API integration tests, egress/audit contracts, coverage ≥60% |
+| E | Ship & runtime | `EgressCheckedAsyncClient`, audit DDL, non-root Docker→Trivy CRITICAL+HIGH + SBOM, Terraform+Checkov |
+
+Details: [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md).
 
 ---
 
@@ -169,7 +183,7 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 |-------|-------|
 | **Status** | `not_started` |
 | **Checkpoint status** | `not_started` |
-| **Checkpoint file** | `app/scrub/pipeline.py` — core string substitution / regex-NLP scrubbing loop |
+| **Checkpoint file** | TBD — core string substitution / regex-NLP scrubbing loop |
 | **Owner (checkpoint)** | Human |
 
 **What we build:** Pre-forward inspection: string flags (API keys, credit cards) + lightweight local NLP (spaCy or high-performance regex) to redact names/corporate terms as tokens like `[REDACTED_NAME]`. **Latency budget: sub-100ms.**
@@ -219,66 +233,70 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 | Phase | Name | Checkpoint file | Checkpoint owner | Phase status | Checkpoint status |
 |-------|------|-----------------|------------------|--------------|-------------------|
 | 1 | Crawl — Async Proxy | `app/proxy/interceptor.py` | Human | `in_progress` | `blocked_on_human` |
-| 2 | Walk — Scrubbing | `app/scrub/pipeline.py` | Human | `not_started` | `not_started` |
+| 2 | Walk — Scrubbing | TBD | Human | `not_started` | `not_started` |
 | 3 | Run — Postgres Audit | TBD | Human | `not_started` | `not_started` |
 | 4 | Cloud — Docker + Terraform | TBD | Human | `not_started` | `not_started` |
 
-### Phase 1 readiness envelope (agent-safe; Checkpoint #1 still blocked)
-
-Landed via nine parallel QRSPI parent agents (artifacts under `thoughts/qrspi/2026-07-20-*`):
-
-| Agent package | Status |
-|---------------|--------|
-| QRSPI playbooks + Ledger process law | landed |
-| Provider reliability (keys / upstream errors / Anthropic stream contract) | landed |
-| Gateway test matrix + CI | landed |
-| Correlation + request logging scaffold (outside interceptor) | landed |
-| AST gateway rules (§11.E.1) | landed |
-| Fuzz/bench on real helpers (§11.E.2–3) | landed |
-| Copyright signatures + Phase 1 quiz packs (§11.E.4–5) | landed |
-| Dashboard deployability hardening (§11.C) | landed |
-| Phase 2 scrub stub path (`app/scrub/pipeline.py`) | landed |
-
-**Next human unlock:** implement `intercept_outbound_request` in `app/proxy/interceptor.py`. Agents must not fill it.
-
 ---
 
-## 5. Operational Protocol - QRSPI Is Mandatory
+## 5. Operational Protocol — QRSPI Is Mandatory
 
-Every developmental task follows QRSPI unless the Ledger explicitly defines a narrower fast path.
+### 5.1 Default developmental cycle
 
-| Stage | Purpose | Allowed inputs | Output / gate |
-|-------|---------|----------------|---------------|
-| 1. Question | Neutralize the task into research questions | User task + Ledger | `task.md`, `questions.md` |
-| 2. Research | Gather codebase facts only | `questions.md`, Ledger | `research.md` |
-| 3. Design | Choose the implementation direction | `task.md`, `questions.md`, `research.md`, Ledger | `design.md` with autonomous decisions |
-| 4. Structure | Split into independently verifiable slices | `design.md`, `research.md`, Ledger | `structure.md` |
-| 5. Plan | Expand slices into tactical implementation steps | `structure.md`, `design.md`, `research.md`, Ledger | `plan.md` |
-| 6. Worktree | Create isolation boundary | QRSPI artifacts | isolated branch/worktree; no implementation |
-| 7. Implement | Execute the checked plan one phase at a time | `plan.md` first | code/docs changes, verification, commits |
-| 8. PR | Present the verified change | `design.md`, `plan.md`, diff, logs | PR referencing Ledger and artifacts |
+1. **Preflight** — Read The Ledger + `.cursor/qrspi/*` (§0).
+2. **QRSPI** — Run stages 1→8 via isolated subagents (details below).
+3. **Human product checkpoint** — If the work touches a `TODO: Human Hands-On Implementation` block, stop there; do not auto-complete it. Inject/keep cheat sheets.
+4. **Governance** — Run `ai-guardrail` locally; CI must stay green; pass comprehension quiz before dashboard merge.
+5. **Validation** — After human fills a checkpoint, run tests / latency / security checks as required by phase.
 
-### Autonomous QRSPI
+### 5.2 QRSPI workflow (law)
 
-QRSPI does not wait for process approval. When a stage exposes choices, the agent chooses the option best grounded in the Ledger, research, and existing code, records the rationale in the artifact, and proceeds.
+Canonical playbooks: [`.cursor/qrspi/`](.cursor/qrspi/)
+
+| Stage | Playbook | Writes | Subagent inputs (ONLY) |
+|-------|----------|--------|-------------------------|
+| 1 Question | `1_question.md` | `task.md`, `questions.md` | Task / ticket + Ledger |
+| 2 Research | `2_research.md` | `research.md` | **`questions.md` only** (never `task.md`) |
+| 3 Design | `3_design.md` | `design.md` | `task.md`, `questions.md`, `research.md` |
+| 4 Structure | `4_structure.md` | `structure.md` | `design.md`, `research.md` |
+| 5 Plan | `5_plan.md` | `plan.md` | `structure.md`, `design.md`, `research.md` |
+| 6 Worktree | `6_worktree.md` | isolated branch/worktree | artifact dir + `plan.md` |
+| 7 Implement | `7_implement.md` | code + checked `plan.md` | **`plan.md` primary** |
+| 8 PR | `8_pr.md` | PR | `design.md` + diff/commits |
+
+Helper subagents: [`.cursor/qrspi/agents/`](.cursor/qrspi/agents/)
+
+Artifacts live under `thoughts/qrspi/<YYYY-MM-DD-brief-description>/`.
+
+```mermaid
+flowchart TD
+  Parent[Parent orchestrator reads Ledger] --> Q[Stage1 Question fresh subagent]
+  Q --> R[Stage2 Research fresh subagent]
+  R --> D[Stage3 Design fresh subagent]
+  D --> S[Stage4 Structure fresh subagent]
+  S --> P[Stage5 Plan fresh subagent]
+  P --> W[Stage6 Worktree or feature branch]
+  W --> I[Stage7 Implement fresh subagent]
+  I --> PR[Stage8 PR]
+```
+
+### 5.3 Autonomous Mode (no QRSPI human gates)
 
 See [`.cursor/qrspi/AUTONOMOUS_MODE.md`](.cursor/qrspi/AUTONOMOUS_MODE.md).
 
-Autonomous QRSPI removes process approval waits. It does not permit agents to complete product learning checkpoints or remove `TODO: Human Hands-On Implementation` blocks.
+- Original QRSPI "wait for user / approve design" steps are **disabled**.
+- The stage agent must still enumerate design options, then **pick the best answer** and record rationale.
+- **Exception:** Human Hands-On **product** checkpoints remain blocked for agents.
 
-### Context Isolation
-
-Each stage runs in fresh context and receives only its allowed artifact inputs. Disk artifacts under `thoughts/qrspi/` are the API between stages.
+### 5.4 Context isolation (non-negotiable)
 
 See [`.cursor/qrspi/CONTEXT_ISOLATION.md`](.cursor/qrspi/CONTEXT_ISOLATION.md).
 
-### Product Learning Checkpoints Are Not Automated
+- **Fresh subagent per QRSPI stage** — do not `resume` a prior stage agent for a later stage.
+- **No shared chat history** across stages — disk artifacts are the only bridge.
+- **File allowlists** — Research must never see `task.md`.
 
-Agents may scaffold, document, validate contracts, and add tests around Human-in-the-Loop checkpoints. Agents must never complete a block marked:
-
-    TODO: Human Hands-On Implementation
-
-For Checkpoint #1, `app/proxy/interceptor.py` remains `blocked_on_human` until the human fills the implementation.
+### 5.5 Learning checkpoints (product, not QRSPI)
 
 Separately from QRSPI gates, before a core pillar feature is auto-completed:
 
@@ -318,11 +336,9 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 /
 ├── architecture_and_roadmap.md          # THIS FILE — The Ledger
 ├── README.md
-├── SETUP_GOVERNANCE.md                  # Human setup for governance CI + dashboard
-├── .cursor/
-│   └── qrspi/                           # QRSPI playbooks, autonomy, context isolation
-├── thoughts/
-│   └── qrspi/                           # QRSPI artifacts per task
+├── SETUP_GOVERNANCE.md
+├── .cursor/qrspi/                       # Mandatory QRSPI playbooks
+├── thoughts/qrspi/                      # Per-task QRSPI artifacts
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml                       # Gateway (Phase 1+)
@@ -331,7 +347,10 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 ├── render.yaml
 ├── docker-compose.yml
 ├── .github/workflows/
-│   └── ai-guardrail.yml                 # Pre-merge governance CI
+│   ├── ai-guardrail.yml                 # Pre-merge governance CI
+│   └── enterprise-hygiene.yml           # Layers B–E (supply chain → ship)
+├── .github/dependabot.yml               # Layer B
+├── .github/CODEOWNERS                   # Layer C
 ├── app/                                 # Gateway service
 │   ├── main.py
 │   ├── config.py
@@ -339,9 +358,11 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 │   ├── proxy/
 │   │   ├── interceptor.py               # ★ HUMAN CHECKPOINT #1
 │   │   └── providers/...
+│   ├── security/                        # Layer E egress + audit scaffold
 │   └── models/...
-├── tests/                               # Gateway tests
-├── governance/                          # Steps 1–5 (Python CLI)
+├── infra/terraform/                     # Layer E IaC stub (+ Checkov)
+├── tests/                               # Gateway tests (Layer D)
+├── governance/                          # Steps 1–6 (Python CLI)
 │   ├── pyproject.toml
 │   ├── README.md
 │   ├── governance/
@@ -369,19 +390,19 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 ## 8. Non-Negotiable Guardrails
 
 1. **No Vercel for the streaming proxy** — use Docker on Fly.io, Render, or (Phase 4) AWS ECS for long-lived async streaming.
-2. **Developmental work must use QRSPI** and store artifacts under `thoughts/qrspi/`.
-3. **Each QRSPI stage must run with fresh context** and only its allowed artifact inputs.
-4. **QRSPI process gates are autonomous**; Human-in-the-Loop product checkpoints are not.
+2. **QRSPI is mandatory** for developmental tasks — playbooks under `.cursor/qrspi/`; artifacts under `thoughts/qrspi/`.
+3. **Fresh subagent per QRSPI stage** — no shared chat history; file allowlists only; Research never reads `task.md`.
+4. **Autonomous QRSPI gates** — agents answer design/plan questions themselves; do not block on humans for QRSPI approvals.
 5. **Sub-100ms scrub budget** applies from Phase 2 onward; measure and enforce with validation scripts.
 6. **Never auto-complete human checkpoint blocks** — agents scaffold, document, and test contracts only.
 7. **Secrets only via environment variables** — never commit API keys or `.env` files.
 8. **The Ledger stays current** — update phase/checkpoint status in this file whenever status changes.
 9. **Supabase PostgreSQL** is the production database target (Phase 3); do not invent a parallel primary store.
-10. **Bugbot** is integrated for GitHub issue tracking; treat review findings as first-class work items.
+10. **Bugbot** findings are first-class work items.
 11. **Opus 4.8 and GPT-5.6 Sol** are restricted roles — do not invoke without explicit instruction.
-12. **No merge to `main` without the `Governance Steps 1-6` status check** once branch protection is enabled (§11). Agents must not disable or skip the workflow to land green builds.
-13. **Step 7 review actions require the dashboard comprehension quiz pass at ≥80%.**
-14. **Dashboard may use Vercel; the streaming gateway may not.**
+12. **No merge to `main` without the `Governance Steps 1–6` check** (§11). Agents must not disable the workflow.
+13. **Dashboard may use Vercel; the streaming gateway may not.**
+14. **Comprehension quiz must be passed** (dashboard or local practice + honest understanding) before treating a PR as human-reviewed.
 
 ---
 
@@ -390,9 +411,10 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | Resume claim | Phase | Human-owned artifact |
 |--------------|-------|----------------------|
 | Async enterprise API proxy / pre-flight intercept | 1 | `app/proxy/interceptor.py` |
-| Localized PII scrubbing pipeline (&lt;100ms) | 2 | `app/scrub/pipeline.py` |
+| Localized PII scrubbing pipeline (&lt;100ms) | 2 | Scrubbing loop (TBD path) |
 | PostgreSQL metrics & audit trails | 3 | Schema + insert path (TBD) |
-| Docker + Terraform private cloud hosting | 4 | `Dockerfile` + `main.tf` (TBD) |
+| Docker + Terraform private cloud hosting | 4 | `Dockerfile` + `infra/terraform/main.tf` (stub landed; expand in Phase 4) |
+| Egress allowlist / audit trail readiness | 1→3 | `app/security/egress.py`, `app/security/audit.py` |
 
 ---
 
@@ -402,8 +424,11 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 |------|--------|--------|
 | 2026-07-19 | Initial Ledger created; Phase 1 scaffold kicked off; Checkpoint #1 armed | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Added §0 Pre-Merge Gate; scaffolded Steps 1–6 (`governance/`, CI workflow, `dashboard/`); §11 setup checklist | Senior Engineer (Grok 4.5) |
-| 2026-07-20 | Mandated QRSPI; clarified Ledger precedence, Actions quiz generation vs dashboard grading, branch protection check name | QRSPI Stage 7 |
-| 2026-07-20 | Phase 1 readiness envelope via nine QRSPI agents (providers, CI, correlation, governance, dashboard, Phase 2 stub); Checkpoint #1 still `blocked_on_human` | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Inserted Step 6 Comprehension Gate (beginner quiz); human review panel becomes Step 7; merge locked until ≥80% | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Landed Enterprise Layers B–E (Dependabot, Gitleaks, Ruff/Mypy/Semgrep/CodeQL, coverage floor, egress/audit, Trivy, Terraform+Checkov) | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Hardened Layers B–E: SHA-pinned Actions, checksummed Gitleaks, Semgrep packs hard-fail, Trivy CRITICAL+HIGH + SBOM, CodeQL upload, `EgressCheckedAsyncClient`, non-root image, coverage ≥60% | Senior Engineer (Grok 4.5) |
+| 2026-07-20 | Operator: Dependabot + Code scanning enabled; Protect Main tightened (strict checks, last-push approval, signed commits); CodeQL `upload: true` | Human + Senior Engineer |
+| 2026-07-20 | Advanced Code scanning: tuned `codeql.yml` (`security-extended`, `CodeQL (Layer C)` check name, SARIF upload); removed duplicate CodeQL job from hygiene workflow | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -425,28 +450,41 @@ Without these steps, the suite runs in CI but GitHub will still allow merges on 
 
 ### B. Branch protection on `main` (critical)
 
-GitHub → **Settings → Branches → Branch protection rule** for `main`:
+Prefer the **Protect Main** ruleset (already active). It requires:
 
-1. Require a pull request before merging
-2. Require status checks to pass → enable **`Governance Steps 1–6`**
-3. (Recommended) Do **not** allow bypassing for admins while learning the workflow
-4. Keep existing Vercel + Bugbot checks if desired — they stay complementary
+1. Pull request before merging
+2. Status checks: **`Governance Steps 1–6`**, **`Governance Quiz`**, **`Enterprise Layers B–E`**, **`CodeQL (Layer C)`**
+3. **Require review from Code Owners**
+4. **Dismiss stale reviews** on new pushes
+5. **Require approval of the most recent reviewable push**
+6. **Branches up to date** before merging
+7. **Signed commits**
+8. CodeQL code-scanning gate + Preview deployment
 
-Until step 2 is enabled, the governance workflow is advisory only.
+Still optional (see [`ENTERPRISE_LAYERS.md`](ENTERPRISE_LAYERS.md)): secret scanning + push protection (confirm on), second CODEOWNER when you have a teammate, governance dashboard deploy. **Dependabot alerts/security updates** and **Code scanning** are enabled.
 
-**Also enforce comprehension in practice:** even with CI green, use the dashboard’s Step 6 quiz before merge — Approve & Merge stays locked until you pass (≥80%).
+**Also enforce comprehension:** require the **`Governance Quiz`** status check (set
+to success by the dashboard after ≥80%). Approve & Merge in the UI stays locked
+until you pass as well.
 
-### C. Deploy the Step 7 dashboard
+### C. Deploy the Step 7 dashboard (Vercel)
 
-```bash
-cd dashboard
-npm install
-# Set GOVERNANCE_DASHBOARD_SECRET + GITHUB_TOKEN (merge rights)
-npm run build && npm start
-# or: deploy to Vercel and set the same env vars in the project
-```
+The quiz UI lives in `dashboard/`. Deploy it as a **new** Vercel project with
+**Root Directory = `dashboard`** (do not reuse unrelated sellable-saas projects).
 
-Create a fine-grained PAT / GitHub App token with `contents: write` + `pull-requests: write` on this repo for the **Approve & Merge** button (`GITHUB_TOKEN` / `GH_MERGE_TOKEN` on the dashboard host).
+On Vercel you **must** attach **Upstash Redis** (Marketplace → Storage) so quiz
+state survives across serverless invocations. Set:
+
+| Env | Where |
+|-----|-------|
+| `GOVERNANCE_DASHBOARD_SECRET` | Vercel + matching GitHub Actions secret |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Auto from Upstash Marketplace |
+| `GOVERNANCE_DASHBOARD_URL` | GitHub Actions secret → your `https://….vercel.app` |
+| `GITHUB_TOKEN` / `GH_MERGE_TOKEN` | Vercel only — fine-grained PAT with `contents: write` + `pull-requests: write` for Approve & Merge |
+
+Click-path checklist: [`SETUP_GOVERNANCE.md`](SETUP_GOVERNANCE.md) §4.
+
+Local dry-run: `cd dashboard && npm install && npm run dev`.
 
 ### D. Local dry-run before pushing
 
