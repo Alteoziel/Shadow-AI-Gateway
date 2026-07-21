@@ -12,7 +12,9 @@ import {
   type Review,
   type StoreStatus,
 } from "@/lib/store";
+import { siteGateEnabled } from "@/lib/siteAuth";
 import { ReviewDetail } from "@/components/ReviewPanel";
+import { SiteLogoutButton } from "@/components/SiteLogoutButton";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -42,9 +44,11 @@ function StatusPill({
 function SetupStatusPanel({
   auth,
   storeStatus,
+  siteGate,
 }: {
   auth: DashboardAuthStatus;
   storeStatus: StoreStatus;
+  siteGate: boolean;
 }) {
   const ingestReady = auth.dashboardSecretConfigured || auth.insecureDevAllowed;
   const reviewerReady =
@@ -68,6 +72,9 @@ function SetupStatusPanel({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <StatusPill ok={siteGate}>
+            {siteGate ? "site password on" : "site password off"}
+          </StatusPill>
           <StatusPill ok={ingestReady}>
             {ingestReady ? "ingest ready" : "ingest locked"}
           </StatusPill>
@@ -121,6 +128,14 @@ function SetupStatusPanel({
                 : "Local mode with normal shared-secret auth."}
           </dd>
         </div>
+        <div className="rounded-md bg-black/25 p-3 md:col-span-2">
+          <dt className="font-semibold text-white">Site password gate</dt>
+          <dd>
+            {siteGate
+              ? "GOVERNANCE_SITE_PASSWORD is set. Visitors must sign in; browser sessions last 7 days."
+              : "Unset. The review UI is publicly readable. Set GOVERNANCE_SITE_PASSWORD on Vercel to enable the gate."}
+          </dd>
+        </div>
       </dl>
     </section>
   );
@@ -150,16 +165,22 @@ export default async function HomePage({ searchParams }: Props) {
   }
 
   const banner = loadError || storeStatus.warning;
+  const siteGate = siteGateEnabled();
 
   return (
     <main>
       <header className="mb-10">
-        <p className="text-xs uppercase tracking-[0.25em] text-mist">
-          Shadow AI Gateway
-        </p>
-        <h1 className="mt-3 font-display text-5xl leading-tight text-white md:text-6xl">
-          Governance
-        </h1>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.25em] text-mist">
+              Shadow AI Gateway
+            </p>
+            <h1 className="mt-3 font-display text-5xl leading-tight text-white md:text-6xl">
+              Governance
+            </h1>
+          </div>
+          {siteGate ? <SiteLogoutButton /> : null}
+        </div>
         <p className="mt-4 max-w-2xl text-lg text-mist">
           Pass the beginner comprehension quiz, then review AST, OWASP, fuzz,
           Big-O, and copyright reports before merging to{" "}
@@ -167,7 +188,11 @@ export default async function HomePage({ searchParams }: Props) {
         </p>
       </header>
 
-      <SetupStatusPanel auth={auth} storeStatus={storeStatus} />
+      <SetupStatusPanel
+        auth={auth}
+        storeStatus={storeStatus}
+        siteGate={siteGate}
+      />
 
       {banner ? (
         <div
