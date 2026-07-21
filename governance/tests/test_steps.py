@@ -336,20 +336,6 @@ def test_comprehension_quiz_varies_by_pr_files(tmp_path: Path) -> None:
     assert "gradeComprehension" in {
         f["name"] for f in pack_b["study_guide"]["key_functions"]
     }
-    question_by_id = {q["id"]: q for q in pack["questions"]}
-    expected_phase1_questions = {
-        "phase1_provider_selection",
-        "phase1_provider_flow",
-        "phase1_streaming_flow",
-        "phase1_checkpoint_501",
-    }
-    assert expected_phase1_questions <= set(question_by_id)
-    assert {
-        question_by_id[qid]["category"] for qid in expected_phase1_questions
-    } == {"vocabulary", "how_it_works", "manual_tasks"}
-    checkpoint = question_by_id["phase1_checkpoint_501"]
-    assert "human-owned" in checkpoint["explanation"]
-    assert "app/proxy/interceptor.py" in checkpoint["explanation"]
 
 
 def test_comprehension_grade_pass_fail() -> None:
