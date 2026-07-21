@@ -14,14 +14,38 @@ CHAT_PAYLOAD = {
 }
 
 
-def test_chat_returns_501_while_interceptor_not_implemented():
-    """Full provider routing unlocks after human fills Checkpoint #1."""
-    response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
-    assert response.status_code == 501
+def test_chat_forwards_with_real_interceptor_and_mocked_provider():
+    """Checkpoint #1 complete: real interceptor + provider adapter path."""
+    mock_provider = AsyncMock()
+    mock_provider.chat_completion.return_value = {
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "model": "gpt-4o-mini",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "pong"},
+                "finish_reason": "stop",
+            }
+        ],
+    }
+
+    with patch(
+        "app.api.v1.chat.OpenAIProvider",
+        return_value=mock_provider,
+    ):
+        response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
+
+    assert response.status_code == 200
     assert response.headers[CORRELATION_ID_HEADER].startswith("corr_")
-    detail = response.json()["detail"]
-    assert "Checkpoint #1" in detail
-    assert "intercept_outbound_request" in detail
+    assert response.json()["choices"][0]["message"]["content"] == "pong"
+    mock_provider.chat_completion.assert_awaited_once()
+    forwarded = mock_provider.chat_completion.await_args.args[0]
+    assert forwarded["model"] == "gpt-4o-mini"
+    assert forwarded["messages"] == [{"role": "user", "content": "ping"}]
+    assert "correlation_id" in forwarded
+    assert "received_at" in forwarded
+    mock_provider.aclose.assert_awaited_once()
 
 
 @pytest.mark.asyncio

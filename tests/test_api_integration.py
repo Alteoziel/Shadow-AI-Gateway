@@ -18,19 +18,40 @@ def test_health_ok() -> None:
 
 def test_chat_rejects_empty_body() -> None:
     response = client.post("/v1/chat/completions", json={})
-    # Either validation 422 or checkpoint 501 — both acceptable pre-checkpoint
-    assert response.status_code in {422, 501}
+    assert response.status_code == 422
 
 
-def test_chat_checkpoint_blocks_until_human_implements() -> None:
-    response = client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": "hello"}],
-        },
-    )
-    assert response.status_code == 501
+def test_chat_with_real_interceptor_and_mocked_provider() -> None:
+    """Checkpoint #1 complete: valid bodies pass the interceptor into providers."""
+    mock_provider = AsyncMock()
+    mock_provider.chat_completion.return_value = {
+        "id": "chatcmpl-int",
+        "object": "chat.completion",
+        "model": "gpt-4o-mini",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "world"},
+                "finish_reason": "stop",
+            }
+        ],
+    }
+
+    with patch("app.api.v1.chat.OpenAIProvider", return_value=mock_provider):
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "world"
+    mock_provider.chat_completion.assert_awaited_once()
+    forwarded = mock_provider.chat_completion.await_args.args[0]
+    assert forwarded["correlation_id"]
+    assert forwarded["received_at"]
 
 
 def test_chat_with_mocked_interceptor_and_provider() -> None:
