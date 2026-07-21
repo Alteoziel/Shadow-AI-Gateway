@@ -83,11 +83,40 @@ TERM_BANK: list[dict[str, Any]] = [
     {
         "term": "comprehension gate",
         "tags": {"governance", "quiz", "dashboard"},
+        "term": "provider",
+        "definition": (
+            "The outside LLM service the gateway can call, such as OpenAI or "
+            "Anthropic. Phase 1 chooses one per request or from config."
+        ),
+    },
+    {
+        "term": "provider adapter",
         "definition": (
             "Step 6 of the guardrail suite: study guide + quiz you must pass before "
             "Approve & Merge unlocks."
         ),
         "near_miss": "Step 1 AST scan that only checks nested loop depth",
+    },
+    {
+        "term": "upstream provider",
+        "definition": (
+            "The external provider API reached after the gateway route and "
+            "human-owned interceptor checkpoint have allowed the request forward."
+        ),
+    },
+    {
+        "term": "streaming / SSE",
+        "definition": (
+            "A response mode where tokens/chunks flow back over time instead of "
+            "waiting for one complete JSON response."
+        ),
+    },
+    {
+        "term": "HTTP 501",
+        "definition": (
+            "Not Implemented. In Phase 1 it means Checkpoint #1 is still pending "
+            "and the human must complete the interceptor before provider forwarding."
+        ),
     },
     {
         "term": "AST",
@@ -542,6 +571,21 @@ def _build_deterministic_pack(
 
     glossary = _pick_glossary(areas)
     subsystem = _subsystem_label(areas)
+    # Relevant glossary subset + always core Phase 1 terms.
+    core_terms = {
+        "pre-flight",
+        "proxy / gateway",
+        "environment variable",
+        "FastAPI",
+        "provider",
+        "provider adapter",
+        "upstream provider",
+        "streaming / SSE",
+        "HTTP 501",
+    }
+    if "httpx" in all_imports or "fastapi" in all_imports:
+        core_terms.add("async / await")
+    glossary = [g for g in PROJECT_GLOSSARY if g["term"] in core_terms]
 
     elevator = (
         f"This PR changes {subsystem}. "
@@ -1507,6 +1551,287 @@ def _make_coding_questions(
 
     assert len(selected) >= 2
     return selected
+
+
+def _make_questions(
+    guide: dict[str, Any],
+    all_fns: list[tuple[str, dict]],
+    imports: set[str],
+    *,
+    paths: list[Path] | None = None,
+    root: Path | None = None,
+) -> list[dict[str, Any]]:
+    questions: list[dict[str, Any]] = []
+
+    # Vocabulary
+    questions.append(
+        _q(
+            "vocab_preflight",
+            "vocabulary",
+            "What does **pre-flight** mean in this project?",
+            [
+                "Running unit tests after deploying to production",
+                "Inspecting/normalizing an LLM request BEFORE it leaves your network",
+                "Formatting Python code with Black",
+                "Buying a plane ticket for an on-call engineer",
+            ],
+            1,
+            "Pre-flight is the choke point: validate/scrub before any upstream provider call.",
+        )
+    )
+    questions.append(
+        _q(
+            "vocab_gateway",
+            "vocabulary",
+            "What is the Shadow AI **gateway**?",
+            [
+                "A React weather app",
+                "A CDN that caches images",
+                "A proxy between users and public LLM APIs that can inspect outbound prompts",
+                "A database of LeetCode solutions",
+            ],
+            2,
+            "It is an enterprise security proxy for outbound LLM traffic.",
+        )
+    )
+
+    # Bigger picture
+    questions.append(
+        _q(
+            "pic_phases",
+            "bigger_picture",
+            "Which statement matches the 12-month plan?",
+            [
+                "Skip scrubbing and go straight to Terraform on day one",
+                "Phase 1 proxy → Phase 2 scrubbing → Phase 3 Postgres audit → Phase 4 Docker/Terraform",
+                "Only build a Next.js marketing site",
+                "Host the streaming proxy on Vercel serverless",
+            ],
+            1,
+            "Crawl → Walk → Run → Cloud. Vercel is forbidden for the streaming proxy.",
+        )
+    )
+    questions.append(
+        _q(
+            "pic_why_quiz",
+            "bigger_picture",
+            "Why does this comprehension quiz exist before merge?",
+            [
+                "GitHub requires emojis on every PR",
+                "So you can rubber-stamp AI code without reading it",
+                "Because merging code you cannot explain is dangerous — you must understand it first",
+                "To replace writing tests forever",
+            ],
+            2,
+            "You are learning; AI wrote a lot of this. Understanding is the resume-defense gate.",
+        )
+    )
+
+    # How it works / functions
+    if all_fns:
+        rel, fn = all_fns[0]
+        questions.append(
+            _q(
+                "fn_primary",
+                "functions",
+                f"In this change, what is `{fn['name']}` (in `{rel}`)?",
+                [
+                    f"A {('async ' if fn['name'] in {x['name'] for _, x in all_fns} else '')}function defined in this codebase that you should be able to explain",
+                    "A built-in Python keyword like `if`",
+                    "An AWS region name",
+                    "A CSS class in the dashboard",
+                ],
+                0,
+                f"`{fn['name']}` is application code in `{rel}`. Args: {', '.join(fn['args']) or 'none'}.",
+            )
+        )
+    else:
+        questions.append(
+            _q(
+                "fn_interceptor",
+                "functions",
+                "Where should outbound LLM requests be validated pre-flight?",
+                [
+                    "In a random CSS file",
+                    "Inside `app/proxy/interceptor.py` via `intercept_outbound_request`",
+                    "Only on the user's phone",
+                    "After the response returns from OpenAI",
+                ],
+                1,
+                "Checkpoint #1 is the interceptor — before any provider adapter runs.",
+            )
+        )
+
+    questions.append(
+        _q(
+            "how_flow",
+            "how_it_works",
+            "Roughly, what is the happy-path request flow for the gateway?",
+            [
+                "Browser → OpenAI directly (gateway unused)",
+                "Client → Gateway route → interceptor → provider adapter → upstream LLM → stream back",
+                "Client → Postgres → Terraform → done",
+                "Client → Bugbot → Vercel → merge",
+            ],
+            1,
+            "The gateway owns the path; providers are adapters behind the interceptor.",
+        )
+    )
+    questions.append(
+        _q(
+            "phase1_provider_selection",
+            "vocabulary",
+            "In Phase 1, what does **provider** mean?",
+            [
+                "The outside LLM service selected for a request, such as OpenAI or Anthropic",
+                "A CSS theme provider in the dashboard",
+                "The person approving the PR",
+                "A local pytest fixture only",
+            ],
+            0,
+            "The provider is the external LLM service; the gateway chooses it from the request or default config.",
+        )
+    )
+    questions.append(
+        _q(
+            "phase1_provider_flow",
+            "how_it_works",
+            "When should the chat route choose and call a provider adapter?",
+            [
+                "Before parsing the request body",
+                "Only after `intercept_outbound_request` succeeds",
+                "Inside the copyright filter",
+                "After returning the response to the client",
+            ],
+            1,
+            "Checkpoint #1 is the pre-flight gate. Provider forwarding happens only after it succeeds.",
+        )
+    )
+    questions.append(
+        _q(
+            "phase1_streaming_flow",
+            "how_it_works",
+            "What is different when `stream=True` in the Phase 1 gateway?",
+            [
+                "The gateway buffers the whole answer and returns one JSON object",
+                "The gateway asks the provider for a stream and relays chunks/SSE back to the client",
+                "The request skips the interceptor because streaming is faster",
+                "The provider is always ignored",
+            ],
+            1,
+            "Streaming still goes through the checkpoint; only the response delivery changes to chunk/SSE relay.",
+        )
+    )
+    questions.append(
+        _q(
+            "phase1_checkpoint_501",
+            "manual_tasks",
+            "What does HTTP 501 mean for Checkpoint #1 in this project?",
+            [
+                "The provider API key is definitely wrong",
+                "The human-owned interceptor is still pending; agents must not fill `app/proxy/interceptor.py`",
+                "Streaming responses are unsupported forever",
+                "The copyright filter found a LeetCode snippet",
+            ],
+            1,
+            "Checkpoint #1 is human-owned: the human must complete `app/proxy/interceptor.py`; agents must not soften or bypass it.",
+        )
+    )
+
+    # Dependencies
+    dep_choice_correct = (
+        "Libraries/modules this code imports or relies on (e.g. FastAPI, httpx) "
+        "plus sibling project files it calls"
+    )
+    questions.append(
+        _q(
+            "dep_meaning",
+            "dependencies",
+            "When we say **dependencies** for a change, what should you check?",
+            [
+                "Only the color of the README badge",
+                dep_choice_correct,
+                "Whether the moon is full",
+                "Only the number of emojis in the commit message",
+            ],
+            1,
+            f"Detected imports in this scan: {', '.join(sorted(imports)[:12]) or 'none yet'}.",
+        )
+    )
+
+    # Manual tasks
+    tasks = guide.get("manual_dev_tasks") or []
+    has_checkpoint = any("Checkpoint" in t or "NotImplemented" in t for t in tasks)
+    questions.append(
+        _q(
+            "manual_checkpoint",
+            "manual_tasks",
+            "If a file has `TODO: Human Hands-On Implementation` or `NotImplementedError`, what should you do?",
+            [
+                "Ignore it and merge anyway",
+                "Ask an agent to silently fill it with no learning",
+                "Treat it as YOUR job — implement/understand it before claiming the resume bullet",
+                "Delete the whole repository",
+            ],
+            2,
+            "The ledger forbids agents from auto-completing human checkpoints.",
+        )
+    )
+    if has_checkpoint:
+        questions.append(
+            _q(
+                "manual_env",
+                "manual_tasks",
+                "Where do real API keys belong?",
+                [
+                    "Committed into GitHub so teammates can see them",
+                    "Hardcoded in interceptor.py",
+                    "In local `.env` / host secret stores — never in git",
+                    "In a public Discord channel",
+                ],
+                2,
+                "Secrets only via environment variables (§8 of the Ledger).",
+            )
+        )
+
+    # Security
+    questions.append(
+        _q(
+            "sec_keys",
+            "security",
+            "Which is a security red flag in a PR?",
+            [
+                "Using pydantic-settings to read env vars",
+                "A hardcoded `API_KEY = \"sk-...\"` string in source",
+                "Adding a `/health` endpoint",
+                "Writing a README",
+            ],
+            1,
+            "Hardcoded secrets are critical findings in the OWASP auditor.",
+        )
+    )
+    questions.append(
+        _q(
+            "sec_why_gate",
+            "security",
+            "Why is reviewing AI-generated code without understanding it dangerous?",
+            [
+                "It isn't — AI is always correct",
+                "You might approve insecure, wrong, or unmaintainable logic you cannot defend in an interview or outage",
+                "GitHub will revoke your account for reading code",
+                "Tests become illegal",
+            ],
+            1,
+            "This quiz exists so 'human review' means informed review, not a blind click.",
+        )
+    )
+
+    # Q11–Q12: coding problems grounded in this PR's code
+    questions.extend(
+        _make_coding_questions(paths or [], root=root, all_fns=all_fns)
+    )
+
+    return questions
 
 
 def _llm_enrich(pack: dict[str, Any], diff_text: str) -> dict[str, Any]:

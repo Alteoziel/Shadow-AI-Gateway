@@ -69,7 +69,7 @@ Pick a long random string (password manager / `openssl rand -hex 32`). You will 
 3. Project name: e.g. `shadow-ai-governance` (anything except the old sellable-saas templates)
 4. **Root Directory** → click Edit → set to **`dashboard`** → Continue
 5. Framework Preset must be **Next.js** (not Other / Vite / Create React App)
-6. **Output Directory** must be **empty / default** — leave it blank.  
+6. **Output Directory** must be **empty / default** — leave it blank.
    Do **not** set it to `public` (that causes: `No Output Directory named "public" found`).
 7. Do **not** deploy yet — first add env + Redis (next steps), or deploy then add and redeploy
 

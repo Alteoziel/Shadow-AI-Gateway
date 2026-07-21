@@ -18,6 +18,12 @@ async def test_intercept_outbound_request_raises_not_implemented():
     assert "Checkpoint #1" in str(exc_info.value)
 
 
+def test_intercept_outbound_request_source_retains_not_implemented_raise():
+    source = inspect.getsource(intercept_outbound_request)
+
+    assert "raise NotImplementedError" in source
+
+
 def test_chat_route_calls_interceptor_before_provider():
     chat_path = Path(__file__).resolve().parents[1] / "app" / "api" / "v1" / "chat.py"
     source = chat_path.read_text(encoding="utf-8")

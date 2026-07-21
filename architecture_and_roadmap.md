@@ -13,7 +13,7 @@
 **Last updated:** 2026-07-20  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
-**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (required check on `main`)  
+**Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (required check on `main`)
 **Task workflow:** **QRSPI is mandatory** — see §5 and [`.cursor/qrspi/`](.cursor/qrspi/)
 
 ---

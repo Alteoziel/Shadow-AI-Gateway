@@ -85,15 +85,25 @@ async def chat_completions(
 ) -> JSONResponse | StreamingResponse:
     raw_body = request_body.model_dump(exclude_none=True)
     headers = {key: value for key, value in request.headers.items()}
+    correlation_id = getattr(request.state, "correlation_id", None)
 
     try:
+        logger.info(
+            "interceptor_invoked path=%s correlation_id=%s",
+            request.url.path,
+            correlation_id,
+        )
         normalized = await intercept_outbound_request(
             body=raw_body,
             headers=headers,
             metadata={"path": str(request.url.path)},
         )
     except NotImplementedError as exc:
-        logger.warning("Interceptor checkpoint not implemented: %s", exc)
+        logger.warning(
+            "Interceptor checkpoint not implemented correlation_id=%s: %s",
+            correlation_id,
+            exc,
+        )
         raise HTTPException(status_code=501, detail=CHECKPOINT_501_DETAIL) from exc
 
     provider_name = _resolve_provider(request_body)
