@@ -919,6 +919,39 @@ def _fake_packages(real: set[str], n: int = 3) -> list[str]:
     return out[:n]
 
 
+def _near_miss_definitions(
+    term: str,
+    definition: str,
+    glossary: list[dict[str, Any]],
+    *,
+    need: int = 2,
+) -> list[str]:
+    """Pick plausible wrong definitions without nested loops in the caller."""
+    seen: set[str] = {definition}
+    out: list[str] = []
+    for item in glossary:
+        if item.get("term") == term:
+            continue
+        d = str(item.get("definition") or "")
+        if d and d not in seen:
+            out.append(d)
+            seen.add(d)
+        if len(out) >= need:
+            return out[:need]
+    for t in TERM_BANK:
+        if t["term"] == term:
+            continue
+        d = str(t.get("definition") or "")
+        if d and d not in seen:
+            out.append(d)
+            seen.add(d)
+        if len(out) >= need:
+            return out[:need]
+    while len(out) < need:
+        out.append("A related concept from another subsystem of this monorepo")
+    return out[:need]
+
+
 def _build_mc_pool(
     guide: dict[str, Any],
     all_fns: list[tuple[str, dict]],
@@ -1022,25 +1055,7 @@ def _build_mc_pool(
         near = (bank or {}).get("near_miss") or (
             "A related CI status check with a different merge effect"
         )
-        other_defs = [
-            x["definition"]
-            for x in glossary
-            if x["term"] != term
-        ][:2]
-        # Prefer near-miss definitions from the TERM_BANK for other project areas
-        while len(other_defs) < 2:
-            for t in TERM_BANK:
-                if t["term"] == term:
-                    continue
-                if t["definition"] not in other_defs and t["definition"] != g["definition"]:
-                    other_defs.append(t["definition"])
-                if len(other_defs) >= 2:
-                    break
-            break
-        while len(other_defs) < 2:
-            other_defs.append(
-                "A related concept from another subsystem of this monorepo"
-            )
+        other_defs = _near_miss_definitions(term, g["definition"], glossary)
         choices = [g["definition"], near, other_defs[0], other_defs[1]]
         pool.append(
             _q(
