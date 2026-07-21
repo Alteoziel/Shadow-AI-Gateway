@@ -8,5 +8,30 @@
     "id": "hardcoded_openai_key_pattern",
     "description": "Example of a forbidden hardcoded OpenAI-looking key assignment pattern",
     "content": "OPENAI_API_KEY = \"sk-proj-abcdefghijklmnopqrstuvwxyz0123456789\"\nclient = OpenAI(api_key=OPENAI_API_KEY)\n"
+  },
+  {
+    "id": "fastapi_sync_httpx_in_async_route",
+    "description": "FastAPI async route that blocks the event loop with synchronous httpx upstream call",
+    "content": "from fastapi import APIRouter\nimport httpx\n\nrouter = APIRouter()\n\n@router.post(\"/v1/chat/completions\")\nasync def chat_completions(payload: dict):\n    response = httpx.post(\"https://api.openai.com/v1/chat/completions\", json=payload, timeout=60)\n    return response.json()\n"
+  },
+  {
+    "id": "httpx_async_client_per_stream_chunk",
+    "description": "Streaming anti-pattern that creates a fresh AsyncClient inside each chunk iteration",
+    "content": "import httpx\n\nasync def proxy_stream(chunks):\n    async for chunk in chunks:\n        async with httpx.AsyncClient(timeout=None) as client:\n            await client.post(\"https://api.anthropic.com/v1/messages\", content=chunk)\n            yield chunk\n"
+  },
+  {
+    "id": "hardcoded_provider_bypass",
+    "description": "Provider routing anti-pattern that ignores request/default provider selection and hardcodes OpenAI",
+    "content": "async def forward_to_provider(request_body, settings):\n    provider_name = \"openai\"\n    provider = OpenAIProvider(settings)\n    payload = request_body.model_dump()\n    return await provider.chat_completion(payload)\n"
+  },
+  {
+    "id": "checkpoint_501_catchall_mask",
+    "description": "Checkpoint anti-pattern that converts every upstream/provider error into a misleading HTTP 501",
+    "content": "from fastapi import HTTPException\n\nasync def chat_route(body):\n    try:\n        return await provider.chat_completion(body)\n    except Exception as exc:\n        raise HTTPException(status_code=501, detail=\"interceptor not implemented\") from exc\n"
+  },
+  {
+    "id": "raw_sse_bytes_without_cleanup",
+    "description": "Streaming relay anti-pattern that forwards raw upstream bytes without closing the response/client",
+    "content": "from fastapi.responses import StreamingResponse\n\nasync def relay(upstream):\n    async def chunks():\n        async for chunk in upstream.aiter_bytes():\n            yield chunk\n    return StreamingResponse(chunks(), media_type=\"text/event-stream\")\n"
   }
 ]

@@ -69,7 +69,7 @@ Pick a long random string (password manager / `openssl rand -hex 32`). You will 
 3. Project name: e.g. `shadow-ai-governance` (anything except the old sellable-saas templates)
 4. **Root Directory** → click Edit → set to **`dashboard`** → Continue
 5. Framework Preset must be **Next.js** (not Other / Vite / Create React App)
-6. **Output Directory** must be **empty / default** — leave it blank.  
+6. **Output Directory** must be **empty / default** — leave it blank.
    Do **not** set it to `public` (that causes: `No Output Directory named "public" found`).
 7. Do **not** deploy yet — first add env + Redis (next steps), or deploy then add and redeploy
 
@@ -92,6 +92,7 @@ Vercel project → **Settings → Environment Variables** (Production + Preview)
 | Env | Value |
 |-----|-------|
 | `GOVERNANCE_DASHBOARD_SECRET` | The secret from 4a |
+| `GOVERNANCE_SITE_PASSWORD` | **Recommended.** Browser login password (separate from 4a). Sessions last 7 days. Needed because Hobby Standard Protection does not lock the production domain. |
 | `GOVERNANCE_REVIEWER_SECRET` | Optional; defaults to dashboard secret |
 | `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | Fine-grained PAT with `contents:write` + `pull-requests:write` (only needed for **Approve & Merge**) |
 | `UPSTASH_REDIS_REST_URL` | Auto from Marketplace (verify present) |
