@@ -92,6 +92,7 @@ Vercel project → **Settings → Environment Variables** (Production + Preview)
 | Env | Value |
 |-----|-------|
 | `GOVERNANCE_DASHBOARD_SECRET` | The secret from 4a |
+| `GOVERNANCE_SITE_PASSWORD` | **Recommended.** Browser login password (separate from 4a). Sessions last 7 days. Needed because Hobby Standard Protection does not lock the production domain. |
 | `GOVERNANCE_REVIEWER_SECRET` | Optional; defaults to dashboard secret |
 | `GITHUB_TOKEN` or `GH_MERGE_TOKEN` | Fine-grained PAT with `contents:write` + `pull-requests:write` (only needed for **Approve & Merge**) |
 | `UPSTASH_REDIS_REST_URL` | Auto from Marketplace (verify present) |
