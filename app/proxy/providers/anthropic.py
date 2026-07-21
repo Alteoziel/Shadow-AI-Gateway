@@ -3,7 +3,12 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-from app.proxy.providers.base import BaseLLMProvider
+from app.proxy.payloads import to_anthropic_payload
+from app.proxy.providers.base import (
+    BaseLLMProvider,
+    map_httpx_error,
+    require_api_key,
+)
 from app.security.egress import assert_allowed_url
 from app.security.http import EgressCheckedAsyncClient
 
@@ -20,67 +25,27 @@ class AnthropicProvider(BaseLLMProvider):
         assert_allowed_url(ANTHROPIC_MESSAGES_URL)
 
     def _headers(self) -> dict[str, str]:
+        api_key = require_api_key("anthropic", self._api_key)
         return {
-            "x-api-key": self._api_key,
+            "x-api-key": api_key,
             "anthropic-version": ANTHROPIC_VERSION,
             "Content-Type": "application/json",
         }
 
-    @staticmethod
-    def _to_anthropic_payload(payload: dict[str, Any]) -> dict[str, Any]:
-        """Map OpenAI-compatible gateway payload to Anthropic Messages API."""
-        messages = []
-        system_parts: list[str] = []
-
-        for message in payload.get("messages", []):
-            role = message.get("role")
-            content = message.get("content", "")
-            if role == "system":
-                if isinstance(content, str):
-                    system_parts.append(content)
-                else:
-                    system_parts.append(str(content))
-                continue
-            if role == "user":
-                messages.append({"role": "user", "content": content})
-                continue
-            if role == "assistant":
-                messages.append({"role": "assistant", "content": content})
-                continue
-            # tool / function / unknown roles are not 1:1 on Anthropic Messages
-            # without tool_use blocks — skip rather than mislabel as assistant
-            continue
-
-        anthropic_payload: dict[str, Any] = {
-            "model": payload["model"],
-            "messages": messages,
-            "max_tokens": payload.get("max_tokens", 1024),
-        }
-        if system_parts:
-            anthropic_payload["system"] = "\n\n".join(system_parts)
-        if payload.get("temperature") is not None:
-            anthropic_payload["temperature"] = payload["temperature"]
-        if payload.get("top_p") is not None:
-            anthropic_payload["top_p"] = payload["top_p"]
-        if payload.get("stop") is not None:
-            anthropic_payload["stop_sequences"] = (
-                [payload["stop"]]
-                if isinstance(payload["stop"], str)
-                else payload["stop"]
-            )
-        return anthropic_payload
-
     async def chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
         assert_allowed_url(ANTHROPIC_MESSAGES_URL)
-        anthropic_payload = self._to_anthropic_payload(payload)
-        response = await self._client.post(
-            ANTHROPIC_MESSAGES_URL,
-            headers=self._headers(),
-            json=anthropic_payload,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return self._to_openai_shape(data, model=payload["model"])
+        anthropic_payload = to_anthropic_payload(payload)
+        try:
+            response = await self._client.post(
+                ANTHROPIC_MESSAGES_URL,
+                headers=self._headers(),
+                json=anthropic_payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return self._to_openai_shape(data, model=payload["model"])
+        except httpx.HTTPError as exc:
+            raise map_httpx_error("anthropic", exc) from exc
 
     async def chat_completion_stream(
         self,
@@ -88,18 +53,26 @@ class AnthropicProvider(BaseLLMProvider):
     ) -> httpx.Response:
         assert_allowed_url(ANTHROPIC_MESSAGES_URL)
         anthropic_payload = {
-            **self._to_anthropic_payload(payload),
+            **to_anthropic_payload(payload),
             "stream": True,
         }
-        return await self._client.send(
-            self._client.build_request(
-                "POST",
-                ANTHROPIC_MESSAGES_URL,
-                headers=self._headers(),
-                json=anthropic_payload,
-            ),
-            stream=True,
-        )
+        response: httpx.Response | None = None
+        try:
+            response = await self._client.send(
+                self._client.build_request(
+                    "POST",
+                    ANTHROPIC_MESSAGES_URL,
+                    headers=self._headers(),
+                    json=anthropic_payload,
+                ),
+                stream=True,
+            )
+            response.raise_for_status()
+            return response
+        except httpx.HTTPError as exc:
+            if response is not None:
+                await response.aclose()
+            raise map_httpx_error("anthropic", exc) from exc
 
     @staticmethod
     def _to_openai_shape(data: dict[str, Any], *, model: str) -> dict[str, Any]:

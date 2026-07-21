@@ -19,12 +19,53 @@ FORBIDDEN_CALLS = {
 
 MAX_NESTED_LOOPS = 2
 
+SYNC_HTTP_RULE_ID = "AST004_SYNC_HTTP_CLIENT_IN_APP"
+CHAT_INTERCEPTOR_ORDER_RULE_ID = "AST005_CHAT_INTERCEPTOR_ORDER"
+
+HTTPX_SYNC_CALLS = {"Client", "get", "post", "put", "patch", "delete", "request", "stream"}
+REQUESTS_SYNC_CALLS = {
+    "Session",
+    "get",
+    "post",
+    "put",
+    "patch",
+    "delete",
+    "head",
+    "options",
+    "request",
+}
+
 
 class _StructureVisitor(ast.NodeVisitor):
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
         self.findings: list[Finding] = []
         self._loop_depth = 0
+        self._is_app_file = _is_app_path(file_path)
+        self._httpx_modules = {"httpx"}
+        self._requests_modules = {"requests"}
+        self._imported_httpx_sync_calls: set[str] = set()
+        self._imported_requests_sync_calls: set[str] = set()
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            local_name = alias.asname or alias.name.split(".", 1)[0]
+            if alias.name == "httpx":
+                self._httpx_modules.add(local_name)
+            if alias.name == "requests":
+                self._requests_modules.add(local_name)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "httpx":
+            for alias in node.names:
+                if alias.name in HTTPX_SYNC_CALLS:
+                    self._imported_httpx_sync_calls.add(alias.asname or alias.name)
+        if node.module == "requests":
+            for alias in node.names:
+                if alias.name in REQUESTS_SYNC_CALLS:
+                    self._imported_requests_sync_calls.add(alias.asname or alias.name)
+        self.generic_visit(node)
 
     def visit_For(self, node: ast.For) -> None:
         self._enter_loop(node)
@@ -79,6 +120,7 @@ class _StructureVisitor(ast.NodeVisitor):
                     suggestion="Remove the call or replace with a safe alternative.",
                 )
             )
+        self._check_sync_http_usage(node)
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -112,6 +154,134 @@ class _StructureVisitor(ast.NodeVisitor):
                 )
             )
 
+    def _check_sync_http_usage(self, node: ast.Call) -> None:
+        if not self._is_app_file:
+            return
+
+        evidence: str | None = None
+        parts = _call_name_parts(node.func)
+        if parts is not None:
+            module_name, attr = parts
+            if module_name in self._httpx_modules and attr in HTTPX_SYNC_CALLS:
+                evidence = f"{module_name}.{attr}"
+            if module_name in self._requests_modules and attr in REQUESTS_SYNC_CALLS:
+                evidence = f"{module_name}.{attr}"
+
+        bare_name = _bare_call_name(node.func)
+        if bare_name in self._imported_httpx_sync_calls:
+            evidence = bare_name
+        if bare_name in self._imported_requests_sync_calls:
+            evidence = bare_name
+
+        if evidence is None:
+            return
+
+        self.findings.append(
+            Finding(
+                step=STEP_ID,
+                severity=Severity.ERROR,
+                message=(
+                    "Synchronous HTTP clients are forbidden in app/ gateway code; "
+                    "use async provider clients instead."
+                ),
+                file=self.file_path,
+                line=node.lineno,
+                rule_id=SYNC_HTTP_RULE_ID,
+                evidence=evidence,
+                suggestion="Use httpx.AsyncClient or the existing async provider interface.",
+            )
+        )
+
+
+def _is_app_path(file_path: str) -> bool:
+    return "app" in Path(file_path).parts
+
+
+def _is_chat_route_path(file_path: str) -> bool:
+    parts = Path(file_path).parts
+    return len(parts) >= 4 and parts[-4:] == ("app", "api", "v1", "chat.py")
+
+
+def _call_name_parts(node: ast.AST) -> tuple[str, str] | None:
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return node.value.id, node.attr
+    return None
+
+
+def _bare_call_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _first_call_line(function: ast.AST, names: set[str], attrs: set[str]) -> int | None:
+    lines: list[int] = []
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id in names:
+            lines.append(node.lineno)
+            continue
+        if isinstance(node.func, ast.Attribute) and node.func.attr in attrs:
+            lines.append(node.lineno)
+    return min(lines) if lines else None
+
+
+def _check_chat_route_interceptor_order(tree: ast.AST, file_path: str) -> list[Finding]:
+    if not _is_chat_route_path(file_path):
+        return []
+
+    route_fn = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "chat_completions"
+        ),
+        None,
+    )
+    if route_fn is None:
+        return []
+
+    interceptor_line = _first_call_line(route_fn, {"intercept_outbound_request"}, set())
+    provider_line = _first_call_line(
+        route_fn,
+        {"_resolve_provider", "_get_provider_adapter"},
+        {"chat_completion", "chat_completion_stream"},
+    )
+
+    if interceptor_line is None:
+        return [
+            Finding(
+                step=STEP_ID,
+                severity=Severity.ERROR,
+                message=(
+                    "chat_completions must call intercept_outbound_request before "
+                    "provider resolution or provider calls."
+                ),
+                file=file_path,
+                line=getattr(route_fn, "lineno", None),
+                rule_id=CHAT_INTERCEPTOR_ORDER_RULE_ID,
+                suggestion="Call intercept_outbound_request before resolving or invoking providers.",
+            )
+        ]
+    if provider_line is not None and provider_line < interceptor_line:
+        return [
+            Finding(
+                step=STEP_ID,
+                severity=Severity.ERROR,
+                message=(
+                    "chat_completions resolves or invokes a provider before "
+                    "intercept_outbound_request."
+                ),
+                file=file_path,
+                line=provider_line,
+                rule_id=CHAT_INTERCEPTOR_ORDER_RULE_ID,
+                suggestion="Move intercept_outbound_request before provider resolution.",
+            )
+        ]
+    return []
+
 
 def _call_name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Name):
@@ -136,7 +306,7 @@ def analyze_file(path: Path) -> list[Finding]:
         ]
     visitor = _StructureVisitor(str(path))
     visitor.visit(tree)
-    return visitor.findings
+    return visitor.findings + _check_chat_route_interceptor_order(tree, str(path))
 
 
 def run(paths: list[Path]) -> StepResult:

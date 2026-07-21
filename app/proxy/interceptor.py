@@ -31,8 +31,10 @@ async def intercept_outbound_request(
     #    providers on bad payloads.
     #
     # Scope: validate required fields (model, messages), attach correlation_id /
-    # received_at, return upstream-ready payload. Do NOT implement scrubbing
-    # (Phase 2) or DB inserts (Phase 3).
+    # received_at, return upstream-ready payload. The surrounding request
+    # lifecycle helper lives in app/proxy/correlation.py; do not duplicate ID
+    # generation policy here. Do NOT implement scrubbing (Phase 2) or DB
+    # inserts (Phase 3).
     # -------------------------------------------------------------------------
     raise NotImplementedError(
         "Checkpoint #1 pending: implement intercept_outbound_request in "
