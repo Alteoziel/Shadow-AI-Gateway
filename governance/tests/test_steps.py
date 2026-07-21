@@ -385,6 +385,33 @@ def test_comprehension_quiz_varies_by_pr_files(tmp_path: Path) -> None:
     assert pack_a["study_guide"]["what_changed"]["top_file"].endswith("interceptor.py")
     assert pack_b["study_guide"]["what_changed"]["top_file"].endswith("store.ts")
 
+    coding_a = {
+        q["id"] for q in pack_a["questions"] if q.get("question_type") == "coding"
+    }
+    coding_b = {
+        q["id"] for q in pack_b["questions"] if q.get("question_type") == "coding"
+    }
+    assert coding_a != coding_b
+    # Proxy PR should get preflight logic; dashboard PR should not get that toy-bank filler
+    assert "code_ch_preflight_body" in coding_a
+    assert "code_ch_preflight_body" not in coding_b
+    # Old always-on toys must not appear on every PR
+    assert "code_ch_max_nest" not in coding_a | coding_b
+    assert "code_ch_normalize_messages" not in coding_a | coding_b
+    # Challenges must embed THIS PR's facts in the prompt (not a generic joke bank)
+    proxy_prompts = " ".join(
+        q["prompt"]
+        for q in pack_a["questions"]
+        if q.get("question_type") == "coding"
+    )
+    assert "intercept_outbound_request" in proxy_prompts or "interceptor.py" in proxy_prompts
+    dash_prompts = " ".join(
+        q["prompt"]
+        for q in pack_b["questions"]
+        if q.get("question_type") == "coding"
+    )
+    assert "gradeComprehension" in dash_prompts or "store.ts" in dash_prompts
+
 
 def test_parse_diff_facts_extracts_symbols() -> None:
     diff = (

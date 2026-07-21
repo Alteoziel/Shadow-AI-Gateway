@@ -1502,7 +1502,17 @@ def _make_questions(
     )
     questions = _select_mc_questions(pool, seed=seed, target=8)
     questions.extend(
-        _make_coding_questions(paths or [], root=root, all_fns=all_fns)
+        _make_coding_questions(
+            paths or [],
+            root=root,
+            all_fns=all_fns,
+            areas=areas,
+            key_functions=list(guide.get("key_functions") or []),
+            files=list(guide.get("files_touched") or []),
+            imports=imports,
+            diff_facts=diff_facts or {},
+            pass_threshold=PASS_THRESHOLD,
+        )
     )
     return questions
 
@@ -1597,240 +1607,461 @@ def _coding_challenge(
     }
 
 
+def _challenge_symbol_file(key_functions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Map symbol → file using THIS PR's key_functions table."""
+    pairs = [
+        (str(kf["name"]), str(kf["file"]))
+        for kf in key_functions
+        if kf.get("name") and kf.get("file")
+    ]
+    if len(pairs) < 1:
+        return None
+    mapping: dict[str, str] = {}
+    for name, file in pairs:
+        mapping.setdefault(name, file)
+    names = list(mapping.keys())
+    tests: list[dict[str, Any]] = []
+    for i, name in enumerate(names[:4]):
+        tests.append({"id": f"t{i+1}", "args": [name], "expected": mapping[name]})
+    tests.append({"id": "t_miss", "args": ["__not_in_this_pr__"], "expected": None})
+    return _coding_challenge(
+        qid="code_ch_symbol_file",
+        prompt=(
+            "**Coding challenge — locate symbols from THIS PR.**\n\n"
+            "Implement `fileForSymbol(name)` using the study-guide table for **this** change:\n"
+            "- Return the file path for the symbols listed below.\n"
+            "- Return `null` for anything else.\n\n"
+            "Symbol → file (encode this yourself — it is not pre-filled in the editor):\n"
+            "```\n"
+            + "\n".join(f"{n} → {mapping[n]}" for n in names[:8])
+            + "\n```"
+        ),
+        starter_code=(
+            "function fileForSymbol(name) {\n"
+            "  // TODO: encode this PR's symbol→file map; return null when unknown\n"
+            "}\n"
+        ),
+        entrypoint="fileForSymbol",
+        tests=tests,
+        explanation=(
+            "You should know where each key symbol in this PR lives before merge."
+        ),
+    )
+
+
+def _challenge_fn_args(all_fns: list[tuple[str, dict]]) -> dict[str, Any] | None:
+    """Return parameter lists for callables defined in THIS PR."""
+    usable: list[tuple[str, list[str]]] = []
+    seen: set[str] = set()
+    for _rel, fn in all_fns:
+        name = fn.get("name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        usable.append((name, list(fn.get("args") or [])))
+        if len(usable) >= 4:
+            break
+    if not usable:
+        return None
+    tests: list[dict[str, Any]] = []
+    for i, (name, args) in enumerate(usable[:4]):
+        tests.append({"id": f"t{i+1}", "args": [name], "expected": args})
+    tests.append({"id": "t_miss", "args": ["__missing__"], "expected": None})
+    return _coding_challenge(
+        qid="code_ch_fn_args",
+        prompt=(
+            "**Coding challenge — know the signatures in THIS PR.**\n\n"
+            "Implement `argsFor(name)`:\n"
+            "- Return the parameter-name array for each function below "
+            "(same order as the real signature).\n"
+            "- Return `null` if the name is not in this PR’s scanned callables.\n\n"
+            "Signatures from this change (encode them — not pre-filled):\n"
+            "```\n"
+            + "\n".join(
+                f"{n}({', '.join(a)})" if a else f"{n}()" for n, a in usable
+            )
+            + "\n```"
+        ),
+        starter_code=(
+            "function argsFor(name) {\n"
+            "  // TODO: encode this PR's signatures; return null when unknown\n"
+            "}\n"
+        ),
+        entrypoint="argsFor",
+        tests=tests,
+        explanation="Signature literacy stops rubber-stamping AI-generated helpers.",
+    )
+
+
+def _challenge_files_in_pr(files: list[str]) -> dict[str, Any] | None:
+    if not files:
+        return None
+    touched = files[:12]
+    distractors = [
+        "app/main.py",
+        "dashboard/src/app/page.tsx",
+        "governance/governance/cli.py",
+        "README.md",
+        "app/proxy/providers/openai.py",
+    ]
+    probes = list(touched[:3])
+    for d in distractors:
+        if d not in touched:
+            probes.append(d)
+        if len(probes) >= 5:
+            break
+    tests = [
+        {
+            "id": f"t{i+1}",
+            "args": [p],
+            "expected": p in touched,
+        }
+        for i, p in enumerate(probes)
+    ]
+    return _coding_challenge(
+        qid="code_ch_files_in_pr",
+        prompt=(
+            "**Coding challenge — files touched by THIS PR.**\n\n"
+            "Implement `isTouched(path)`:\n"
+            "- Return `true` if `path` is in this PR’s changed-file list.\n"
+            "- Return `false` otherwise.\n\n"
+            "Changed files (encode the set yourself):\n"
+            "```\n"
+            + "\n".join(touched)
+            + "\n```"
+        ),
+        starter_code=(
+            "function isTouched(path) {\n"
+            "  // TODO: encode this PR's changed paths; return boolean\n"
+            "}\n"
+        ),
+        entrypoint="isTouched",
+        tests=tests,
+        explanation="Basic PR literacy: know which paths actually changed.",
+    )
+
+
+def _challenge_preflight(areas: set[str]) -> dict[str, Any] | None:
+    if not ({"proxy", "interceptor", "api"} & areas):
+        return None
+    return _coding_challenge(
+        qid="code_ch_preflight_body",
+        prompt=(
+            "**Coding challenge — pre-flight body checks (this proxy/interceptor PR).**\n\n"
+            "Implement `preflightBody(body)` mirroring Checkpoint #1 basics:\n"
+            "- If `body` is null/undefined or not a plain object, throw `Error` "
+            "with message `body must be an object`.\n"
+            "- If `body.model` is missing or not a non-empty string, throw `Error` "
+            "with message `model is required`.\n"
+            "- Let `messages = body.messages`.\n"
+            "  - If missing/undefined/null, treat as `[]`.\n"
+            "  - If present but not an array, throw `Error` with message "
+            "`messages must be a list`.\n"
+            "- Return a **new** object: `{ ...body, messages }` (do not mutate `body`)."
+        ),
+        starter_code=(
+            "function preflightBody(body) {\n"
+            "  // TODO: validate model + messages, return a new normalized object\n"
+            "}\n"
+        ),
+        entrypoint="preflightBody",
+        tests=[
+            {
+                "id": "t1",
+                "args": [{"model": "gpt", "messages": [{"role": "user"}]}],
+                "expected": {"model": "gpt", "messages": [{"role": "user"}]},
+            },
+            {
+                "id": "t2",
+                "args": [{"model": "gpt"}],
+                "expected": {"model": "gpt", "messages": []},
+            },
+            {"id": "t3", "args": [{"messages": []}], "raises": "Error"},
+            {"id": "t4", "args": [{"model": "x", "messages": "nope"}], "raises": "Error"},
+            {"id": "t5", "args": [None], "raises": "Error"},
+        ],
+        explanation=(
+            "This is the interceptor discipline for THIS gateway PR: validate before "
+            "any provider adapter runs."
+        ),
+    )
+
+
+def _challenge_parse_repo(rels: list[str], fn_names: set[str]) -> dict[str, Any] | None:
+    if not (
+        any("github" in r for r in rels)
+        or "parseGithubRepo" in fn_names
+        or "parseOwnerRepo" in fn_names
+    ):
+        return None
+    return _coding_challenge(
+        qid="code_ch_parse_repo",
+        prompt=(
+            "**Coding challenge — reimplement `parseGithubRepo` from this PR.**\n\n"
+            "Implement `parseOwnerRepo(repo)` with the same contract as "
+            "`dashboard/src/lib/github.ts`:\n"
+            "- Trim whitespace.\n"
+            "- Accept only `owner/name` where each side matches `[A-Za-z0-9_.-]+`.\n"
+            "- On success return `{ owner, name, full }` with `full = owner/name`.\n"
+            "- Otherwise return `null` (including extra `/` segments)."
+        ),
+        starter_code=(
+            "function parseOwnerRepo(repo) {\n"
+            "  // TODO: mirror parseGithubRepo\n"
+            "}\n"
+        ),
+        entrypoint="parseOwnerRepo",
+        tests=[
+            {
+                "id": "t1",
+                "args": ["Alteoziel/Shadow-AI-Gateway"],
+                "expected": {
+                    "owner": "Alteoziel",
+                    "name": "Shadow-AI-Gateway",
+                    "full": "Alteoziel/Shadow-AI-Gateway",
+                },
+            },
+            {
+                "id": "t2",
+                "args": ["  a/b  "],
+                "expected": {"owner": "a", "name": "b", "full": "a/b"},
+            },
+            {"id": "t3", "args": ["nope"], "expected": None},
+            {"id": "t4", "args": ["a/b/c"], "expected": None},
+            {"id": "t5", "args": [""], "expected": None},
+        ],
+        explanation="Same validation used before building GitHub API URLs in this change.",
+    )
+
+
+def _challenge_quiz_score(
+    areas: set[str], threshold: float, fn_names: set[str]
+) -> dict[str, Any] | None:
+    if not (
+        {"quiz", "governance"} & areas
+        or "gradeComprehension" in fn_names
+        or "quizPassed" in fn_names
+    ):
+        return None
+    return _coding_challenge(
+        qid="code_ch_quiz_score",
+        prompt=(
+            "**Coding challenge — comprehension pass rule (this quiz/dashboard PR).**\n\n"
+            f"Implement `quizPassed(correct, total, threshold)` used by Step 6 "
+            f"(default threshold `{threshold}`):\n"
+            "- Return `true` iff `total > 0` and `(correct / total) >= threshold`.\n"
+            "- If `total === 0`, return `false`."
+        ),
+        starter_code=(
+            "function quizPassed(correct, total, threshold) {\n"
+            "  // TODO: implement the real dashboard pass rule\n"
+            "}\n"
+        ),
+        entrypoint="quizPassed",
+        tests=[
+            {"id": "t1", "args": [8, 10, 0.8], "expected": True},
+            {"id": "t2", "args": [7, 10, 0.8], "expected": False},
+            {"id": "t3", "args": [0, 0, 0.8], "expected": False},
+            {"id": "t4", "args": [4, 5, 0.8], "expected": True},
+            {"id": "t5", "args": [1, 2, 0.5], "expected": True},
+        ],
+        explanation="Matches gradeComprehension’s ≥ threshold rule on the dashboard.",
+    )
+
+
+def _challenge_quiz_status(
+    areas: set[str], rels: list[str], fn_names: set[str]
+) -> dict[str, Any] | None:
+    if not (
+        {"quiz", "github"} & areas
+        or any("github" in r for r in rels)
+        or "setGovernanceQuizStatus" in fn_names
+        or "quizCommitState" in fn_names
+    ):
+        return None
+    return _coding_challenge(
+        qid="code_ch_quiz_status",
+        prompt=(
+            "**Coding challenge — Governance Quiz commit status (this PR).**\n\n"
+            "Implement `quizCommitState(comprehensionPassed)`:\n"
+            "- If `comprehensionPassed` is strictly `true`, return `\"success\"`.\n"
+            "- Otherwise return `\"pending\"`."
+        ),
+        starter_code=(
+            "function quizCommitState(comprehensionPassed) {\n"
+            "  // TODO: pending until the human actually passes\n"
+            "}\n"
+        ),
+        entrypoint="quizCommitState",
+        tests=[
+            {"id": "t1", "args": [True], "expected": "success"},
+            {"id": "t2", "args": [False], "expected": "pending"},
+            {"id": "t3", "args": [None], "expected": "pending"},
+        ],
+        explanation="CI opens pending; dashboard flips success only after a real pass.",
+    )
+
+
+def _challenge_added_symbol(diff_facts: dict[str, Any]) -> dict[str, Any] | None:
+    added = [str(s) for s in (diff_facts.get("added_symbols") or []) if s]
+    if not added:
+        return None
+    probes = list(added[:3])
+    for filler in (
+        "intercept_outbound_request",
+        "gradeComprehension",
+        "parseGithubRepo",
+        "collect_paths",
+    ):
+        if filler not in added:
+            probes.append(filler)
+        if len(probes) >= 5:
+            break
+    tests = [
+        {"id": f"t{i+1}", "args": [p], "expected": p in added}
+        for i, p in enumerate(probes)
+    ]
+    return _coding_challenge(
+        qid="code_ch_added_symbol",
+        prompt=(
+            "**Coding challenge — symbols added/updated in THIS diff.**\n\n"
+            "Implement `wasAdded(name)`:\n"
+            "- Return `true` if `name` appears as an added/updated symbol in this PR’s diff.\n"
+            "- Return `false` otherwise.\n\n"
+            "Added/updated symbols (encode the set yourself):\n"
+            "```\n"
+            + "\n".join(added[:12])
+            + "\n```"
+        ),
+        starter_code=(
+            "function wasAdded(name) {\n"
+            "  // TODO: encode symbols added in this diff; return boolean\n"
+            "}\n"
+        ),
+        entrypoint="wasAdded",
+        tests=tests,
+        explanation="Forces attention on what the unified diff actually introduced.",
+    )
+
+
+def _challenge_import_used(imports: set[str]) -> dict[str, Any] | None:
+    real = sorted(i for i in imports if i and not i.startswith("("))
+    if not real:
+        return None
+    prefer = [
+        i
+        for i in (
+            "fastapi",
+            "httpx",
+            "pydantic",
+            "next",
+            "react",
+            "openai",
+            "typer",
+        )
+        if i in real
+    ]
+    sample = (prefer or real)[:3]
+    fakes = [p for p in PROJECT_PACKAGE_DISTRACTORS if p not in real][:3]
+    probes = sample + fakes
+    tests = [
+        {"id": f"t{i+1}", "args": [p], "expected": p in real}
+        for i, p in enumerate(probes[:6])
+    ]
+    return _coding_challenge(
+        qid="code_ch_import_used",
+        prompt=(
+            "**Coding challenge — imports used by THIS PR’s files.**\n\n"
+            "Implement `importUsed(name)`:\n"
+            "- Return `true` if `name` is among the imports scanned from this change.\n"
+            "- Return `false` otherwise.\n\n"
+            "Imports from this PR (encode the set yourself):\n"
+            "```\n"
+            + ", ".join(real[:16])
+            + "\n```"
+        ),
+        starter_code=(
+            "function importUsed(name) {\n"
+            "  // TODO: encode this PR's imports; return boolean\n"
+            "}\n"
+        ),
+        entrypoint="importUsed",
+        tests=tests,
+        explanation="Dependency awareness for the modules this PR actually touches.",
+    )
+
+
 def _make_coding_questions(
     paths: list[Path],
     *,
     root: Path | None,
     all_fns: list[tuple[str, dict]],
+    areas: set[str] | None = None,
+    key_functions: list[dict[str, Any]] | None = None,
+    files: list[str] | None = None,
+    imports: set[str] | None = None,
+    diff_facts: dict[str, Any] | None = None,
+    pass_threshold: float = PASS_THRESHOLD,
 ) -> list[dict[str, Any]]:
-    """Emit ≥2 short coding challenges the learner must solve in an editor.
-
-    Challenges are JavaScript so the dashboard can run/grade them safely in the
-    browser and again on the server (node:vm). Prompts are tied to this PR's
-    files/concepts when possible.
-    """
+    """Build ≥2 coding challenges grounded in THIS PR (not a global toy bank)."""
     rels = [_rel(p, root).replace("\\", "/") for p in paths if p.is_file()]
-    joined = " ".join(rels).lower()
-    snippets = _extract_python_snippets(paths, root=root)
-    questions: list[dict[str, Any]] = []
+    areas = areas or _areas_for_files(rels)
+    key_functions = key_functions or []
+    files = files or rels
+    imports = imports or set()
+    diff_facts = diff_facts or {}
+    fn_names = {fn["name"] for _, fn in all_fns if fn.get("name")}
 
-    # --- Challenge pool (pick PR-relevant ones first) ---
-    pool: list[dict[str, Any]] = []
+    # Behavioral (subsystem logic) vs literacy (encode THIS PR's facts)
+    behavioral = [
+        _challenge_preflight(areas),
+        _challenge_parse_repo(rels, fn_names),
+        _challenge_quiz_status(areas, rels, fn_names),
+        _challenge_quiz_score(areas, pass_threshold, fn_names),
+    ]
+    literacy = [
+        _challenge_added_symbol(diff_facts),
+        _challenge_symbol_file(key_functions),
+        _challenge_fn_args(all_fns),
+        _challenge_import_used(imports),
+        _challenge_files_in_pr(files),
+    ]
 
-    if any("github" in r for r in rels) or "quiz" in joined or "governance" in joined:
-        pool.append(
-            _coding_challenge(
-                qid="code_ch_parse_repo",
-                prompt=(
-                    "**Coding challenge — GitHub repo ref (this PR’s governance check).**\n\n"
-                    "Implement `parseOwnerRepo(repo)`.\n"
-                    "- Input is a string like `\"Alteoziel/Shadow-AI-Gateway\"`.\n"
-                    "- If valid `owner/name` (letters, numbers, `_`, `.`, `-`), "
-                    "return `{ owner, name, full }` where `full` is `owner/name`.\n"
-                    "- Otherwise return `null`.\n"
-                    "- Trim whitespace. Reject empty parts or extra `/` segments."
-                ),
-                starter_code=(
-                    "function parseOwnerRepo(repo) {\n"
-                    "  // TODO: implement\n"
-                    "}\n"
-                ),
-                entrypoint="parseOwnerRepo",
-                tests=[
-                    {
-                        "id": "t1",
-                        "args": ["Alteoziel/Shadow-AI-Gateway"],
-                        "expected": {
-                            "owner": "Alteoziel",
-                            "name": "Shadow-AI-Gateway",
-                            "full": "Alteoziel/Shadow-AI-Gateway",
-                        },
-                    },
-                    {"id": "t2", "args": ["  a/b  "], "expected": {"owner": "a", "name": "b", "full": "a/b"}},
-                    {"id": "t3", "args": ["nope"], "expected": None},
-                    {"id": "t4", "args": ["a/b/c"], "expected": None},
-                    {"id": "t5", "args": [""], "expected": None},
-                ],
-                explanation=(
-                    "Same rules as `parseGithubRepo` in the dashboard — validate before "
-                    "building GitHub API URLs."
-                ),
-            )
-        )
-
-    pool.append(
-        _coding_challenge(
-            qid="code_ch_quiz_score",
-            prompt=(
-                "**Coding challenge — comprehension scoring.**\n\n"
-                "Implement `quizPassed(correct, total, threshold)`.\n"
-                "- `correct` and `total` are non-negative integers; `threshold` is 0–1 "
-                "(e.g. `0.8`).\n"
-                "- Return `true` iff `total > 0` and `(correct / total) >= threshold`.\n"
-                "- If `total === 0`, return `false`."
-            ),
-            starter_code=(
-                "function quizPassed(correct, total, threshold) {\n"
-                "  // TODO: implement\n"
-                "}\n"
-            ),
-            entrypoint="quizPassed",
-            tests=[
-                {"id": "t1", "args": [8, 10, 0.8], "expected": True},
-                {"id": "t2", "args": [7, 10, 0.8], "expected": False},
-                {"id": "t3", "args": [0, 0, 0.8], "expected": False},
-                {"id": "t4", "args": [4, 5, 0.8], "expected": True},
-                {"id": "t5", "args": [1, 2, 0.5], "expected": True},
-            ],
-            explanation="Matches the dashboard Step 6 pass rule (≥ threshold).",
-        )
-    )
-
-    pool.append(
-        _coding_challenge(
-            qid="code_ch_normalize_messages",
-            prompt=(
-                "**Coding challenge — gateway request shape.**\n\n"
-                "Implement `normalizeMessages(body)` for chat payloads:\n"
-                "- Read `body.messages`.\n"
-                "- If missing/undefined/null, treat as `[]`.\n"
-                "- If it is not an array, throw `Error` with message "
-                "`messages must be a list`.\n"
-                "- Otherwise return a **new** object: all keys from `body`, with "
-                "`messages` set to that array (do not mutate the input)."
-            ),
-            starter_code=(
-                "function normalizeMessages(body) {\n"
-                "  // TODO: implement\n"
-                "}\n"
-            ),
-            entrypoint="normalizeMessages",
-            tests=[
-                {
-                    "id": "t1",
-                    "args": [{"model": "x", "messages": [{"role": "user"}]}],
-                    "expected": {"model": "x", "messages": [{"role": "user"}]},
-                },
-                {
-                    "id": "t2",
-                    "args": [{"model": "x"}],
-                    "expected": {"model": "x", "messages": []},
-                },
-                {
-                    "id": "t3",
-                    "args": [{"messages": "oops"}],
-                    "raises": "Error",
-                },
-            ],
-            explanation=(
-                "Same pre-flight discipline as the gateway interceptor — validate "
-                "before upstream calls."
-            ),
-        )
-    )
-
-    pool.append(
-        _coding_challenge(
-            qid="code_ch_quiz_status",
-            prompt=(
-                "**Coding challenge — Governance Quiz commit status.**\n\n"
-                "Implement `quizCommitState(comprehensionPassed)` used when CI/dashboard "
-                "updates the GitHub check:\n"
-                "- If `comprehensionPassed` is strictly `true`, return `\"success\"`.\n"
-                "- Otherwise return `\"pending\"`."
-            ),
-            starter_code=(
-                "function quizCommitState(comprehensionPassed) {\n"
-                "  // TODO: implement\n"
-                "}\n"
-            ),
-            entrypoint="quizCommitState",
-            tests=[
-                {"id": "t1", "args": [True], "expected": "success"},
-                {"id": "t2", "args": [False], "expected": "pending"},
-                {"id": "t3", "args": [None], "expected": "pending"},
-            ],
-            explanation="CI opens the check as pending; a passed quiz flips it to success.",
-        )
-    )
-
-    if any("ast" in r or "comprehension" in r for r in rels) or snippets:
-        pool.append(
-            _coding_challenge(
-                qid="code_ch_max_nest",
-                prompt=(
-                    "**Coding challenge — AST nested-loop depth.**\n\n"
-                    "Implement `maxNestDepth(depths)` where `depths` is an array of "
-                    "integers (loop nesting at various points).\n"
-                    "- Return the maximum value in the array.\n"
-                    "- If the array is empty, return `0`.\n\n"
-                    f"This PR’s governance AST rule fails when depth exceeds 2"
-                    + (
-                        f" — related files include `{snippets[0]['file']}`."
-                        if snippets
-                        else "."
-                    )
-                ),
-                starter_code=(
-                    "function maxNestDepth(depths) {\n"
-                    "  // TODO: implement\n"
-                    "}\n"
-                ),
-                entrypoint="maxNestDepth",
-                tests=[
-                    {"id": "t1", "args": [[1, 2, 3, 2]], "expected": 3},
-                    {"id": "t2", "args": [[]], "expected": 0},
-                    {"id": "t3", "args": [[1]], "expected": 1},
-                    {"id": "t4", "args": [[2, 2, 1]], "expected": 2},
-                ],
-                explanation="AST001 blocks merge when nested loop depth > 2.",
-            )
-        )
-
-    # Prefer challenges whose ids mention themes present in the PR; keep unique order
     selected: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def _take(qid: str) -> None:
-        for q in pool:
-            if q["id"] == qid and qid not in seen:
-                selected.append(q)
-                seen.add(qid)
-                return
-
-    if any("github" in r for r in rels):
-        _take("code_ch_parse_repo")
-    if "quiz" in joined or "comprehension" in joined or "governance" in joined:
-        _take("code_ch_quiz_score")
-        _take("code_ch_quiz_status")
-    if any("proxy" in r or "interceptor" in r or "gateway" in r for r in rels):
-        _take("code_ch_normalize_messages")
-    if snippets or any("ast" in r or "comprehension" in r for r in rels):
-        _take("code_ch_max_nest")
-
-    for q in pool:
-        if len(selected) >= 2:
-            break
-        if q["id"] not in seen:
+    def _take_from(bucket: list[dict[str, Any] | None], *, limit: int) -> None:
+        taken = 0
+        for q in bucket:
+            if q is None or q["id"] in seen:
+                continue
             selected.append(q)
             seen.add(q["id"])
+            taken += 1
+            if taken >= limit or len(selected) >= 3:
+                return
 
-    # Always at least 2; if pool somehow tiny, duplicate-safe fill already handled
-    while len(selected) < 2 and pool:
-        for q in pool:
-            if q["id"] not in seen:
-                selected.append(q)
-                seen.add(q["id"])
-            if len(selected) >= 2:
-                break
-        break
+    # Prefer 1–2 real logic challenges for this subsystem, then PR-fact literacy
+    _take_from(behavioral, limit=2)
+    _take_from(literacy, limit=3 - len(selected))
 
-    # If PR is large, offer a third challenge when we have extras
-    if len(seen) < len(pool) and len(selected) == 2:
-        for q in pool:
-            if q["id"] not in seen:
-                selected.append(q)
-                break
+    # Guaranteed fallbacks so the quiz always has ≥2 interactive items
+    if len(selected) < 2:
+        _take_from(
+            [
+                _challenge_files_in_pr(files or rels or ["(unknown)"]),
+                _challenge_symbol_file(
+                    key_functions
+                    or [
+                        {
+                            "name": "reviewThisPr",
+                            "file": (files or rels or ["README.md"])[0],
+                        }
+                    ]
+                ),
+            ],
+            limit=2,
+        )
 
     assert len(selected) >= 2
     return selected
