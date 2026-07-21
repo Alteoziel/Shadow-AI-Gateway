@@ -245,8 +245,21 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
         "    return len(text)\n",
         encoding="utf-8",
     )
+    diff = (
+        "diff --git a/proxy_bit.py b/proxy_bit.py\n"
+        "--- a/proxy_bit.py\n"
+        "+++ b/proxy_bit.py\n"
+        "@@ -0,0 +1,8 @@\n"
+        '+"""tiny helper"""\n'
+        "+async def intercept_outbound_request(body):\n"
+        '+\t"""Pre-flight normalize."""\n'
+        "+    return body\n"
+        "+\n"
+        "+def score_prompt(text: str) -> int:\n"
+        "+    return len(text)\n"
+    )
     result = comprehension_gate.run(
-        [src], diff_text="diff --git a/x", root=tmp_path, skip_llm=True
+        [src], diff_text=diff, root=tmp_path, skip_llm=True
     )
     assert result.passed
     pack = result.metrics["comprehension"]
@@ -260,6 +273,10 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
         assert q["language"] == "javascript"
     assert pack["study_guide"]["glossary"]
     assert pack["study_guide"]["manual_dev_tasks"]
+    assert pack["study_guide"]["what_changed"]["summary"]
+    assert "score_prompt" in pack["study_guide"]["what_changed"]["added_symbols"] or (
+        "intercept_outbound_request" in pack["study_guide"]["what_changed"]["added_symbols"]
+    )
     # Static template IDs from the old bank must not reappear
     banned = {
         "vocab_preflight",
@@ -271,14 +288,26 @@ def test_comprehension_generates_quiz(tmp_path: Path) -> None:
         "sec_why_gate",
         "sec_keys",
         "manual_checkpoint",
+        "phase1_provider_selection",
+        "phase1_provider_flow",
+        "phase1_streaming_flow",
+        "phase1_checkpoint_501",
     }
     ids = {q["id"] for q in pack["questions"]}
     assert ids.isdisjoint(banned)
     mc = [q for q in pack["questions"] if q.get("question_type") != "coding"]
     assert len(mc) >= 5
+    cats = {q["category"] for q in mc}
+    assert "what_changed" in cats
     # Prompts should mention this PR's symbols/files, not only generic project lore
     blob = " ".join(q["prompt"] for q in mc).lower()
     assert "intercept_outbound_request" in blob or "proxy_bit" in blob or "score_prompt" in blob
+    # Distractors should not be joke options
+    all_choices = " ".join(
+        c for q in mc for c in (q.get("choices") or [])
+    ).lower()
+    assert "plane ticket" not in all_choices
+    assert "moon is full" not in all_choices
 
 
 def test_comprehension_quiz_varies_by_pr_files(tmp_path: Path) -> None:
@@ -309,13 +338,30 @@ def test_comprehension_quiz_varies_by_pr_files(tmp_path: Path) -> None:
 
     pack_a = comprehension_gate.run(
         [interceptor],
-        diff_text="diff --git a/app/proxy/interceptor.py",
+        diff_text=(
+            "diff --git a/app/proxy/interceptor.py b/app/proxy/interceptor.py\n"
+            "--- a/app/proxy/interceptor.py\n"
+            "+++ b/app/proxy/interceptor.py\n"
+            "@@ -0,0 +1,3 @@\n"
+            "+async def intercept_outbound_request(body):\n"
+            '+\t"""Validate before provider call."""\n'
+            "+    return body\n"
+        ),
         root=tmp_path,
         skip_llm=True,
     ).metrics["comprehension"]
     pack_b = comprehension_gate.run(
         [store],
-        diff_text="diff --git a/dashboard/src/lib/store.ts",
+        diff_text=(
+            "diff --git a/dashboard/src/lib/store.ts b/dashboard/src/lib/store.ts\n"
+            "--- a/dashboard/src/lib/store.ts\n"
+            "+++ b/dashboard/src/lib/store.ts\n"
+            "@@ -0,0 +1,4 @@\n"
+            "+import { Redis } from '@upstash/redis';\n"
+            "+export function gradeComprehension(pack, answers) {\n"
+            "+  return { passed: true };\n"
+            "+}\n"
+        ),
         root=tmp_path,
         skip_llm=True,
     ).metrics["comprehension"]
@@ -336,6 +382,28 @@ def test_comprehension_quiz_varies_by_pr_files(tmp_path: Path) -> None:
     assert "gradeComprehension" in {
         f["name"] for f in pack_b["study_guide"]["key_functions"]
     }
+    assert pack_a["study_guide"]["what_changed"]["top_file"].endswith("interceptor.py")
+    assert pack_b["study_guide"]["what_changed"]["top_file"].endswith("store.ts")
+
+
+def test_parse_diff_facts_extracts_symbols() -> None:
+    diff = (
+        "diff --git a/app/proxy/foo.py b/app/proxy/foo.py\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/app/proxy/foo.py\n"
+        "@@ -0,0 +1,5 @@\n"
+        "+def brand_new_helper(x):\n"
+        "+    return x\n"
+        "+async def another_one():\n"
+        "+    return 1\n"
+    )
+    facts = comprehension_gate._parse_diff_facts(diff)
+    assert facts["top_file"] == "app/proxy/foo.py"
+    assert "brand_new_helper" in facts["added_symbols"]
+    assert "another_one" in facts["added_symbols"]
+    assert facts["total_added"] >= 4
+    assert "brand_new_helper" in facts["summary"] or "another_one" in facts["summary"]
 
 
 def test_comprehension_grade_pass_fail() -> None:

@@ -201,6 +201,7 @@ TERM_BANK: list[dict[str, Any]] = [
 
 CATEGORY_LABELS = {
     "vocabulary": "Vocabulary & definitions",
+    "what_changed": "What changed in this PR",
     "how_it_works": "How this change works",
     "bigger_picture": "Bigger picture / architecture",
     "dependencies": "Dependencies & what it touches",
@@ -210,6 +211,20 @@ CATEGORY_LABELS = {
     "coding_problem": "Coding problem (from this PR)",
 }
 
+# Near-miss packages from THIS monorepo (used as plausible wrong answers).
+PROJECT_PACKAGE_DISTRACTORS = [
+    "fastapi",
+    "httpx",
+    "pydantic",
+    "typer",
+    "next",
+    "react",
+    "@upstash/redis",
+    "openai",
+    "anthropic",
+    "pytest",
+]
+
 
 def _rel(path: Path, root: Path | None) -> str:
     if root is None:
@@ -218,6 +233,16 @@ def _rel(path: Path, root: Path | None) -> str:
         return str(path.resolve().relative_to(root.resolve()))
     except ValueError:
         return str(path)
+
+
+def _python_arg_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    """Positional + keyword-only arg names (skip self/cls)."""
+    names: list[str] = []
+    for a in list(node.args.args) + list(node.args.kwonlyargs):
+        if a.arg in {"self", "cls"}:
+            continue
+        names.append(a.arg)
+    return names
 
 
 def _extract_python_symbols(path: Path) -> dict[str, Any]:
@@ -241,7 +266,7 @@ def _extract_python_symbols(path: Path) -> dict[str, Any]:
             info["functions"].append(
                 {
                     "name": node.name,
-                    "args": [a.arg for a in node.args.args],
+                    "args": _python_arg_names(node),
                     "lineno": node.lineno,
                     "doc": ast.get_docstring(node) or "",
                 }
@@ -250,7 +275,7 @@ def _extract_python_symbols(path: Path) -> dict[str, Any]:
             info["async_functions"].append(
                 {
                     "name": node.name,
-                    "args": [a.arg for a in node.args.args],
+                    "args": _python_arg_names(node),
                     "lineno": node.lineno,
                     "doc": ast.get_docstring(node) or "",
                 }
@@ -474,7 +499,8 @@ def _detect_manual_tasks(
                 f"There is a human hands-on TODO in `{rel}` — implement it yourself; "
                 "agents must not silently complete it."
             )
-        if "NotImplementedError" in text:
+        # Only flag real raises — string literals in quiz templates must not count.
+        if re.search(r"raise\s+NotImplementedError\b", text):
             tasks.append(
                 f"`{rel}` still raises NotImplementedError — the feature is scaffolded "
                 "but not finished."
@@ -498,6 +524,105 @@ def _detect_manual_tasks(
 def _stable_seed(rels: list[str], diff_text: str | None) -> int:
     material = "\n".join(sorted(rels)) + "\n" + (diff_text or "")[:4000]
     return int(hashlib.sha256(material.encode("utf-8")).hexdigest()[:12], 16)
+
+
+def _parse_diff_facts(diff_text: str | None) -> dict[str, Any]:
+    """Pull concrete, beginner-friendly facts from a unified diff for quiz grounding."""
+    facts: dict[str, Any] = {
+        "files": [],
+        "added_symbols": [],
+        "removed_symbols": [],
+        "sample_added_lines": [],
+        "total_added": 0,
+        "total_removed": 0,
+        "summary": "",
+        "top_file": "",
+    }
+    if not (diff_text or "").strip():
+        return facts
+
+    current: dict[str, Any] | None = None
+    file_re = re.compile(r"^diff --git a/(.+?) b/(.+)$")
+    add_sym = re.compile(
+        r"^\+\s*(?:export\s+)?(?:async\s+)?(?:def|function|class)\s+([A-Za-z_][\w]*)"
+        r"|^\+\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_][\w]*)\s*="
+    )
+    rem_sym = re.compile(
+        r"^\-\s*(?:export\s+)?(?:async\s+)?(?:def|function|class)\s+([A-Za-z_][\w]*)"
+        r"|^\-\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_][\w]*)\s*="
+    )
+
+    def _flush() -> None:
+        nonlocal current
+        if current is not None:
+            facts["files"].append(current)
+            current = None
+
+    for line in diff_text.splitlines():
+        m = file_re.match(line)
+        if m:
+            _flush()
+            current = {
+                "path": m.group(2),
+                "added": 0,
+                "removed": 0,
+                "status": "modified",
+            }
+            continue
+        if current is None:
+            continue
+        if line.startswith("new file mode"):
+            current["status"] = "added"
+            continue
+        if line.startswith("deleted file mode"):
+            current["status"] = "deleted"
+            continue
+        if line.startswith("+++ ") or line.startswith("--- "):
+            continue
+        if line.startswith("+"):
+            current["added"] += 1
+            facts["total_added"] += 1
+            sm = add_sym.match(line)
+            if sm:
+                name = sm.group(1) or sm.group(2)
+                if name and name not in facts["added_symbols"]:
+                    facts["added_symbols"].append(name)
+            content = line[1:].strip()
+            if (
+                content
+                and not content.startswith(("#", "//", "*", "import ", "from "))
+                and len(content) > 12
+                and len(facts["sample_added_lines"]) < 6
+            ):
+                facts["sample_added_lines"].append(content[:140])
+        elif line.startswith("-"):
+            current["removed"] += 1
+            facts["total_removed"] += 1
+            sm = rem_sym.match(line)
+            if sm:
+                name = sm.group(1) or sm.group(2)
+                if name and name not in facts["removed_symbols"]:
+                    facts["removed_symbols"].append(name)
+    _flush()
+
+    if facts["files"]:
+        top = max(facts["files"], key=lambda f: f["added"] + f["removed"])
+        facts["top_file"] = top["path"]
+        n_files = len(facts["files"])
+        bits = [
+            f"Edits touch {n_files} file(s) "
+            f"(+{facts['total_added']}/−{facts['total_removed']} lines)."
+        ]
+        if facts["added_symbols"]:
+            bits.append(
+                "New/updated symbols include: "
+                + ", ".join(f"`{s}`" for s in facts["added_symbols"][:5])
+                + "."
+            )
+        elif facts["top_file"]:
+            bits.append(f"Most churn is in `{facts['top_file']}`.")
+        facts["summary"] = " ".join(bits)
+    return facts
 
 
 def _pick_glossary(areas: set[str], *, limit: int = 6) -> list[dict[str, str]]:
@@ -574,6 +699,7 @@ def _build_deterministic_pack(
     security_hints = _scan_security_hints(file_paths, root)
     npm_deps = _read_npm_deps(root) if "dashboard" in areas else []
     seed = _stable_seed(changed_names, diff_text)
+    diff_facts = _parse_diff_facts(diff_text)
 
     key_functions = []
     for rel, fn in all_fns[:12]:
@@ -590,14 +716,22 @@ def _build_deterministic_pack(
     glossary = _pick_glossary(areas)
     subsystem = _subsystem_label(areas)
 
-    elevator = (
-        f"This PR changes {subsystem}. "
-        + (
+    elevator_bits = [f"This PR changes {subsystem}."]
+    if diff_facts.get("summary"):
+        elevator_bits.append(str(diff_facts["summary"]))
+    elif changed_names:
+        elevator_bits.append(
             "Files involved: " + ", ".join(changed_names[:8]) + "."
-            if changed_names
-            else "Review the study guide for what is being proposed."
         )
-    )
+    else:
+        elevator_bits.append("Review the study guide for what is being proposed.")
+    if key_functions:
+        elevator_bits.append(
+            "Focus first on: "
+            + ", ".join(f"`{kf['name']}`" for kf in key_functions[:3])
+            + "."
+        )
+    elevator = " ".join(elevator_bits)
 
     bigger_bits = [
         f"Primary areas touched: {', '.join(sorted(areas))}."
@@ -666,6 +800,14 @@ def _build_deterministic_pack(
         "files_touched": changed_names,
         "areas": sorted(areas),
         "diff_chars": len(diff_text or ""),
+        "what_changed": {
+            "summary": diff_facts.get("summary") or "",
+            "top_file": diff_facts.get("top_file") or (changed_names[0] if changed_names else ""),
+            "added_symbols": list(diff_facts.get("added_symbols") or [])[:8],
+            "removed_symbols": list(diff_facts.get("removed_symbols") or [])[:8],
+            "total_added": int(diff_facts.get("total_added") or 0),
+            "total_removed": int(diff_facts.get("total_removed") or 0),
+        },
     }
 
     questions = _make_questions(
@@ -678,6 +820,7 @@ def _build_deterministic_pack(
         seed=seed,
         npm_deps=npm_deps,
         security_hints=security_hints,
+        diff_facts=diff_facts,
     )
     return {
         "learner_level": "absolute_beginner",
@@ -760,21 +903,19 @@ def _other_fns(fns: list[tuple[str, dict]], correct: str, n: int = 3) -> list[st
 
 
 def _fake_packages(real: set[str], n: int = 3) -> list[str]:
-    candidates = [
-        "django",
-        "flask",
-        "express",
-        "mongodb",
-        "pytorch",
-        "tensorflow",
-        "rails",
-        "laravel",
-        "spring-boot",
-        "kafka",
-        "selenium",
-        "jquery",
-    ]
-    out = [c for c in candidates if c not in real]
+    """Prefer other packages from this monorepo as near-miss distractors."""
+    out: list[str] = []
+    for c in PROJECT_PACKAGE_DISTRACTORS:
+        if c not in real and c not in out:
+            out.append(c)
+        if len(out) >= n:
+            return out[:n]
+    # Fallback only if the PR somehow already imports everything above
+    for c in ("django", "flask", "express", "mongodb", "jquery", "rails"):
+        if c not in real and c not in out:
+            out.append(c)
+        if len(out) >= n:
+            break
     return out[:n]
 
 
@@ -787,6 +928,7 @@ def _build_mc_pool(
     seed: int,
     npm_deps: list[str],
     security_hints: list[str],
+    diff_facts: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Candidate MC questions grounded in this PR (caller selects a subset)."""
     pool: list[dict[str, Any]] = []
@@ -796,22 +938,108 @@ def _build_mc_pool(
     deps = list(guide.get("dependencies") or [])
     key_fns = list(guide.get("key_functions") or [])
     security_notes = list(guide.get("security_notes") or [])
+    diff_facts = diff_facts or {}
+    wc = guide.get("what_changed") or {}
+
+    # --- What changed (basics of THIS PR) ---
+    top_file = str(wc.get("top_file") or diff_facts.get("top_file") or (files[0] if files else ""))
+    if top_file:
+        distractor_files = _other_files(files or [top_file], top_file)
+        pool.append(
+            _q(
+                "changed_top_file",
+                "what_changed",
+                "Which file has the most churn (added+removed lines) or is the primary focus of this PR?",
+                [top_file, *distractor_files],
+                0,
+                f"Diff/file scan points at `{top_file}` as the main focus for this change.",
+                seed=seed + 1,
+            )
+        )
+
+    added_syms = list(wc.get("added_symbols") or diff_facts.get("added_symbols") or [])
+    if added_syms:
+        correct = added_syms[0]
+        wrong = _other_fns(all_fns, correct, 3)
+        # Prefer other symbols from the repo that were NOT added in this diff
+        for filler in ("intercept_outbound_request", "gradeComprehension", "collect_paths"):
+            if filler != correct and filler not in wrong and filler not in added_syms:
+                wrong.append(filler)
+        pool.append(
+            _q(
+                f"changed_symbol_{correct[:28]}",
+                "what_changed",
+                "Which symbol appears as newly added/updated in this PR’s diff?",
+                [correct, *wrong[:3]],
+                0,
+                f"Unified diff shows `{correct}` on added lines among: "
+                + ", ".join(added_syms[:5])
+                + ".",
+                seed=seed + 2,
+            )
+        )
+    elif key_fns:
+        kf = key_fns[0]
+        wrong = _other_fns(all_fns, kf["name"], 3)
+        pool.append(
+            _q(
+                f"changed_focus_{kf['name'][:28]}",
+                "what_changed",
+                "Which callable should you be able to explain after reading this PR?",
+                [kf["name"], *wrong[:3]],
+                0,
+                f"`{kf['name']}` is a key function in `{kf['file']}` for this change set.",
+                seed=seed + 2,
+            )
+        )
+
+    if files:
+        area_list = ", ".join(sorted(areas)) or "general"
+        correct = (
+            f"It modifies `{files[0]}` and related files under: {area_list}."
+        )
+        pool.append(
+            _q(
+                "changed_scope",
+                "what_changed",
+                "In plain English, what is the scope of this PR?",
+                [
+                    correct,
+                    "It only renames a README badge and touches no application code",
+                    "It replaces the entire gateway with a mobile-only client",
+                    "It deletes the governance suite and removes the quiz gate",
+                ],
+                0,
+                "Grounded in files_touched + detected areas for this pack.",
+                seed=seed + 3,
+            )
+        )
 
     # --- Vocabulary (from this PR's glossary) ---
     for i, g in enumerate(glossary[:4]):
         term = g["term"]
         bank = next((t for t in TERM_BANK if t["term"] == term), None)
         near = (bank or {}).get("near_miss") or (
-            "An unrelated CI badge with no merge effect"
+            "A related CI status check with a different merge effect"
         )
         other_defs = [
             x["definition"]
             for x in glossary
             if x["term"] != term
         ][:2]
+        # Prefer near-miss definitions from the TERM_BANK for other project areas
+        while len(other_defs) < 2:
+            for t in TERM_BANK:
+                if t["term"] == term:
+                    continue
+                if t["definition"] not in other_defs and t["definition"] != g["definition"]:
+                    other_defs.append(t["definition"])
+                if len(other_defs) >= 2:
+                    break
+            break
         while len(other_defs) < 2:
             other_defs.append(
-                "A marketing slogan with no technical meaning in this codebase"
+                "A related concept from another subsystem of this monorepo"
             )
         choices = [g["definition"], near, other_defs[0], other_defs[1]]
         pool.append(
@@ -887,26 +1115,41 @@ def _build_mc_pool(
             )
         )
 
-    if len(files) >= 1:
+    if len(files) >= 2:
         focus = files[0]
-        area_guess = sorted(_areas_for_files([focus]))
-        correct = (
-            f"It is part of this PR’s change set — you should be able to explain why "
-            f"`{focus}` was modified ({', '.join(area_guess)})."
-        )
+        sibling = files[1]
         pool.append(
             _q(
-                "file_focus_primary",
+                "how_files_relate",
                 "how_it_works",
-                f"Why does `{focus}` matter for reviewing this PR?",
+                f"How should you think about `{focus}` relative to `{sibling}` in this PR?",
                 [
-                    correct,
-                    "It is listed only because CI scanned the whole monorepo — ignore it",
-                    f"It is superseded by an identically named file under `vendor/` and unused",
-                    "Behavioral changes here cannot affect quiz grading or gateway traffic",
+                    f"Both are in this change set — understand how `{focus}` and `{sibling}` interact before merge",
+                    f"`{sibling}` is unrelated noise; only `{focus}` can affect runtime behavior",
+                    f"Reviewing either file is enough because they are duplicate copies of the same module",
+                    "Ignore both until after merge; CI will rewrite them on main",
                 ],
                 0,
-                f"`{focus}` is in files_touched for this comprehension pack.",
+                "Multi-file PRs need a mental model of how the touched pieces connect.",
+                seed=seed + 14,
+            )
+        )
+    elif files:
+        focus = files[0]
+        area_guess = sorted(_areas_for_files([focus]))
+        pool.append(
+            _q(
+                "how_file_matters",
+                "how_it_works",
+                f"What should you verify about `{focus}` before approving?",
+                [
+                    f"Why it changed, what calls it, and what breaks in the {', '.join(area_guess) or 'system'} if it is wrong",
+                    "Only whether the filename looks familiar — skip reading the body",
+                    "Only whether Prettier/Black formatting changed",
+                    "Only whether the author is a bot account",
+                ],
+                0,
+                f"`{focus}` is in files_touched; basics first, then blast radius.",
                 seed=seed + 14,
             )
         )
@@ -991,11 +1234,26 @@ def _build_mc_pool(
         )
 
     # --- Dependencies ---
-    real_dep = None
-    for d in deps:
-        if d and not d.startswith("("):
-            real_dep = d
-            break
+    def _preferred_dep(candidates: list[str]) -> str | None:
+        prefer = [
+            "fastapi",
+            "httpx",
+            "pydantic",
+            "openai",
+            "anthropic",
+            "next",
+            "react",
+            "@upstash/redis",
+            "typer",
+            "pytest",
+        ]
+        clean = [d for d in candidates if d and not d.startswith("(") and not d.startswith("@types")]
+        for p in prefer:
+            if p in clean:
+                return p
+        return clean[0] if clean else None
+
+    real_dep = _preferred_dep(deps)
     if real_dep:
         fakes = _fake_packages(set(deps) | set(npm_deps), 3)
         pool.append(
@@ -1010,7 +1268,7 @@ def _build_mc_pool(
             )
         )
     if npm_deps and "dashboard" in areas:
-        pick = npm_deps[seed % len(npm_deps)]
+        pick = _preferred_dep(npm_deps) or npm_deps[seed % len(npm_deps)]
         fakes = _fake_packages(set(npm_deps), 3)
         pool.append(
             _q(
@@ -1020,7 +1278,7 @@ def _build_mc_pool(
                 "and may matter for this change?",
                 [pick, *fakes],
                 0,
-                f"From dashboard package.json dependencies (sample relevant to this PR).",
+                "From dashboard package.json dependencies (sample relevant to this PR).",
                 seed=seed + 31,
             )
         )
@@ -1032,9 +1290,9 @@ def _build_mc_pool(
                 "When reviewing dependencies for this change, what should you verify?",
                 [
                     "Imports/modules these files use and sibling project files they call at runtime",
-                    "Only whether the README badge color changed",
-                    "Only the number of commits on the branch",
-                    "Only whether the PR title contains an emoji",
+                    "Only whether Vercel preview DNS propagated for the marketing site",
+                    "Only whether the AST guardrail nested-loop limit is set to 2",
+                    "Only whether the Governance Quiz commit status emoji is present",
                 ],
                 0,
                 f"This PR touches {len(files)} file(s); check their real import graph.",
@@ -1163,6 +1421,7 @@ def _select_mc_questions(pool: list[dict[str, Any]], *, seed: int, target: int =
         by_cat.setdefault(q["category"], []).append(q)
 
     preferred = [
+        "what_changed",
         "vocabulary",
         "functions",
         "how_it_works",
@@ -1191,11 +1450,13 @@ def _select_mc_questions(pool: list[dict[str, Any]], *, seed: int, target: int =
         selected.append(q)
         seen_ids.add(q["id"])
 
-    # If still short, keep what we have (coding challenges pad the quiz)
-    rng.shuffle(selected)
-    # Re-order: keep category diversity visible — vocabulary/functions first-ish
-    # but still vary by rotating with seed
-    rotate = seed % max(len(selected), 1)
+    # Prefer leading with what_changed / vocabulary so the quiz opens on PR basics
+    selected.sort(
+        key=lambda q: 0
+        if q["category"] in {"what_changed", "vocabulary", "functions"}
+        else 1
+    )
+    rotate = seed % max(min(3, len(selected)), 1)
     selected = selected[rotate:] + selected[:rotate]
     return selected[:target]
 
@@ -1211,6 +1472,7 @@ def _make_questions(
     seed: int = 0,
     npm_deps: list[str] | None = None,
     security_hints: list[str] | None = None,
+    diff_facts: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     areas = areas or set(guide.get("areas") or ["general"])
     pool = _build_mc_pool(
@@ -1221,6 +1483,7 @@ def _make_questions(
         seed=seed,
         npm_deps=npm_deps or [],
         security_hints=security_hints or [],
+        diff_facts=diff_facts,
     )
     questions = _select_mc_questions(pool, seed=seed, target=8)
     questions.extend(
@@ -1255,7 +1518,7 @@ def _snippet_from_function(
     seg = ast.get_source_segment(source, node) or ""
     if len(seg.strip()) < 20:
         return None
-    args = [a.arg for a in node.args.args if a.arg != "self"]
+    args = _python_arg_names(node)
     return {
         "file": rel,
         "name": node.name,
@@ -1566,25 +1829,47 @@ def _llm_enrich(pack: dict[str, Any], diff_text: str) -> dict[str, Any]:
 
     base_url = os.getenv("GOVERNANCE_LLM_BASE_URL", "https://api.openai.com/v1")
     model = os.getenv("GOVERNANCE_LLM_MODEL", "gpt-4o-mini")
-    system = """You help an absolute beginner engineer understand a PR before merging.
+    system = """You help an absolute beginner engineer understand THIS PR before merging.
 Return JSON only:
 {
   "extra_glossary": [{"term":"...","definition":"..."}],
   "extra_questions": [{
     "id":"llm_...",
-    "category":"how_it_works|bigger_picture|dependencies|manual_tasks|functions|security|vocabulary",
+    "category":"what_changed|vocabulary|how_it_works|bigger_picture|dependencies|manual_tasks|functions|security",
     "prompt":"...",
     "choices":["...","...","...","..."],
     "answer_index":0,
     "explanation":"..."
   }],
-  "plain_english_summary":"2-4 sentences at a beginner level"
+  "plain_english_summary":"2-4 sentences: what this PR changed (basics first), then how it fits the wider project"
 }
-Rules: kind tone, no jargon without defining it, 3-5 extra questions, exactly 4 choices each.
+Hard rules:
+- Focus mainly on BASIC facts of what happened in THIS diff (files, functions, behavior).
+- Also teach how the change fits the wider Shadow AI Gateway / governance dashboard project.
+- Produce 5-8 questions covering as many categories as possible (especially what_changed).
+- Exactly 4 choices each. Distractors must be PLAUSIBLE near-misses from THIS codebase
+  (other real subsystems: FastAPI proxy, interceptor, dashboard quiz, Upstash, governance CI).
+- NEVER use joke/absurd options (moon, plane tickets, emoji counts, Discord, LeetCode dumps).
+- Kind tone; define jargon in the question or explanation. Use real names from the diff.
 """
+    guide_snip = {
+        k: pack["study_guide"].get(k)
+        for k in (
+            "elevator_pitch",
+            "bigger_picture",
+            "glossary",
+            "key_functions",
+            "dependencies",
+            "manual_dev_tasks",
+            "security_notes",
+            "files_touched",
+            "areas",
+            "what_changed",
+        )
+    }
     payload = {
         "model": model,
-        "temperature": 0.2,
+        "temperature": 0.3,
         "messages": [
             {"role": "system", "content": system},
             {
@@ -1592,8 +1877,8 @@ Rules: kind tone, no jargon without defining it, 3-5 extra questions, exactly 4 
                 "content": (
                     "Diff to teach from:\n\n"
                     + diff_text[:50000]
-                    + "\n\nExisting study guide JSON:\n"
-                    + json.dumps(pack["study_guide"])[:8000]
+                    + "\n\nStudy guide facts JSON:\n"
+                    + json.dumps(guide_snip)[:10000]
                 ),
             },
         ],
@@ -1621,6 +1906,7 @@ Rules: kind tone, no jargon without defining it, 3-5 extra questions, exactly 4 
     if data.get("plain_english_summary"):
         guide["elevator_pitch"] = str(data["plain_english_summary"])
 
+    llm_questions: list[dict[str, Any]] = []
     for raw in data.get("extra_questions") or []:
         choices = raw.get("choices") or []
         if len(choices) != 4:
@@ -1631,18 +1917,37 @@ Rules: kind tone, no jargon without defining it, 3-5 extra questions, exactly 4 
             continue
         if idx < 0 or idx > 3:
             continue
-        cat = str(raw.get("category") or "how_it_works")
-        pack["questions"].append(
+        # Reject absurd distractors if the model slips
+        joined = " ".join(str(c).lower() for c in choices)
+        if any(
+            bad in joined
+            for bad in ("plane ticket", "moon is full", "leetcode", "discord", "emoji")
+        ):
+            continue
+        cat = str(raw.get("category") or "what_changed")
+        llm_questions.append(
             _q(
-                str(raw.get("id") or f"llm_{len(pack['questions'])}"),
+                str(raw.get("id") or f"llm_{len(llm_questions)}"),
                 cat,
                 str(raw.get("prompt") or "What does this change do?"),
                 [str(c) for c in choices],
                 idx,
                 str(raw.get("explanation") or "Review the study guide."),
+                seed=hash(str(raw.get("id"))) & 0xFFFF,
             )
         )
-    pack["generator"] = "deterministic+llm"
+
+    if llm_questions:
+        coding = [q for q in pack["questions"] if q.get("question_type") == "coding"]
+        deterministic_mc = [
+            q for q in pack["questions"] if q.get("question_type") != "coding"
+        ]
+        # Prefer LLM (diff-aware) questions; fill remaining category gaps from deterministic
+        covered = {q["category"] for q in llm_questions}
+        fillers = [q for q in deterministic_mc if q["category"] not in covered]
+        merged_mc = (llm_questions + fillers)[:8]
+        pack["questions"] = merged_mc + coding
+        pack["generator"] = "deterministic+llm"
     return pack
 
 
