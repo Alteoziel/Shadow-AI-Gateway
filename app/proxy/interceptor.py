@@ -1,5 +1,8 @@
 from collections.abc import Mapping
 from typing import Any
+from fastapi import HTTPException
+from datetime import UTC, datetime
+from uuid import uuid4
 
 
 async def intercept_outbound_request(
@@ -8,33 +11,19 @@ async def intercept_outbound_request(
     headers: Mapping[str, str] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """
-    Pre-flight choke point: validate and normalize outbound LLM payloads
-    before any provider adapter is invoked.
 
-    Human Checkpoint #1 — see architecture_and_roadmap.md §6.
-    """
-    # -------------------------------------------------------------------------
-    # TODO: Human Hands-On Implementation
-    #
-    # Implement pre-flight validation and normalization here. The chat route
-    # calls this function before every upstream provider request.
-    #
-    # Cheat sheet (why this works):
-    # 1. Pre-flight means inspect/normalize the outbound payload **before** any
-    #    bytes hit OpenAI/Anthropic — this is the choke point for later scrubbing
-    #    and audit.
-    # 2. `async def` keeps the event loop free to serve other requests while
-    #    awaiting I/O; the gateway must not block on a single upstream call.
-    # 3. Return a normalized internal request that provider adapters can stream
-    #    against; raise HTTPException(4xx) on invalid input and never call
-    #    providers on bad payloads.
-    #
-    # Scope: validate required fields (model, messages), attach correlation_id /
-    # received_at, return upstream-ready payload. Do NOT implement scrubbing
-    # (Phase 2) or DB inserts (Phase 3).
-    # -------------------------------------------------------------------------
-    raise NotImplementedError(
-        "Checkpoint #1 pending: implement intercept_outbound_request in "
-        "app/proxy/interceptor.py (see architecture_and_roadmap.md §6)."
-    )
+    model = body.get("model")
+    messages = body.get("messages")
+    if not isinstance(model, str) or not model.strip():
+        raise HTTPException(status_code=400, detail="model is required")
+    if not isinstance(messages, list) or len(messages) < 1:
+        raise HTTPException(status_code=400, detail="messages must be a non-empty list")
+    for message in messages:
+        if not isinstance(message, dict) or "role" not in message or "content" not in message:
+            raise HTTPException(status_code=400, detail="each message needs role and content")
+    correlation_id = str(uuid4())
+    received_at = datetime.now(UTC).isoformat()
+    normalized = body.copy()
+    normalized["correlation_id"] = correlation_id
+    normalized["received_at"] = received_at
+    return normalized
