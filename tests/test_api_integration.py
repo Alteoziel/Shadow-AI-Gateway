@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from app.main import app
 from fastapi.testclient import TestClient
+from tests.conftest import AUTH_HEADERS
 
 client = TestClient(app)
 
@@ -17,8 +18,13 @@ def test_health_ok() -> None:
 
 
 def test_chat_rejects_empty_body() -> None:
-    response = client.post("/v1/chat/completions", json={})
+    response = client.post("/v1/chat/completions", json={}, headers=AUTH_HEADERS)
     assert response.status_code == 422
+
+
+def test_chat_rejects_unauthenticated_empty_body() -> None:
+    response = client.post("/v1/chat/completions", json={})
+    assert response.status_code == 401
 
 
 def test_chat_with_real_interceptor_and_mocked_provider() -> None:
@@ -40,6 +46,7 @@ def test_chat_with_real_interceptor_and_mocked_provider() -> None:
     with patch("app.api.v1.chat.OpenAIProvider", return_value=mock_provider):
         response = client.post(
             "/v1/chat/completions",
+            headers=AUTH_HEADERS,
             json={
                 "model": "gpt-4o-mini",
                 "messages": [{"role": "user", "content": "hello"}],
@@ -82,6 +89,7 @@ def test_chat_with_mocked_interceptor_and_provider() -> None:
     ):
         response = client.post(
             "/v1/chat/completions",
+            headers=AUTH_HEADERS,
             json={
                 "model": "gpt-4o-mini",
                 "messages": [{"role": "user", "content": "hello"}],

@@ -1,14 +1,15 @@
-"""Layer E — audit log schema scaffold (Phase 3 target: Supabase Postgres).
+"""Layer E — audit log schema + process-wide sink (Phase 3 → Postgres).
 
-No live DB required yet. Models define the enterprise audit trail contract so
-Phase 3 inserts map cleanly to compliance fields.
+In-memory sink is wired on the request path now so future code always has an
+audit hook. Phase 3 swaps the sink implementation for Supabase without
+changing call sites.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -16,6 +17,9 @@ from pydantic import BaseModel, Field
 
 class AuditEventType(StrEnum):
     REQUEST_RECEIVED = "request_received"
+    AUTH_OK = "auth_ok"
+    AUTH_DENIED = "auth_denied"
+    RATE_LIMITED = "rate_limited"
     INTERCEPTOR_OK = "interceptor_ok"
     INTERCEPTOR_BLOCK = "interceptor_block"
     PII_REDACTED = "pii_redacted"
@@ -62,8 +66,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_correlation ON audit_events (correla
 """
 
 
+class AuditSink(Protocol):
+    async def write(self, event: AuditEvent) -> AuditEvent: ...
+
+
 class InMemoryAuditSink:
-    """Dev/test sink until Supabase is wired in Phase 3."""
+    """Dev/test / Phase-1 sink until Supabase is wired in Phase 3."""
 
     def __init__(self) -> None:
         self.events: list[AuditEvent] = []
@@ -71,3 +79,43 @@ class InMemoryAuditSink:
     async def write(self, event: AuditEvent) -> AuditEvent:
         self.events.append(event)
         return event
+
+    def clear(self) -> None:
+        self.events.clear()
+
+
+_sink: InMemoryAuditSink = InMemoryAuditSink()
+
+
+def get_audit_sink() -> InMemoryAuditSink:
+    return _sink
+
+
+def set_audit_sink(sink: InMemoryAuditSink) -> None:
+    """Replace process sink (tests)."""
+    global _sink
+    _sink = sink
+
+
+async def emit_audit(
+    event_type: AuditEventType,
+    *,
+    correlation_id: str,
+    blocked: bool = False,
+    reason: str | None = None,
+    user_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> AuditEvent:
+    event = AuditEvent(
+        event_type=event_type,
+        correlation_id=correlation_id or "unknown",
+        blocked=blocked,
+        reason=reason,
+        user_id=user_id,
+        provider=provider,
+        model=model,
+        metadata=metadata or {},
+    )
+    return await get_audit_sink().write(event)

@@ -73,6 +73,17 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 - "Patterns to Follow" is critical — call out both good and bad patterns found in the codebase.
 - "What We're NOT Doing" prevents scope creep downstream.
 
+## Secure generation constraints
+
+Mandatory for any design that touches parsing, auth, networking, `/v1` routes, or secrets:
+
+- **Defensive prompts:** Name concrete libraries and attack classes (e.g. `defusedxml` / XXE, max payload size, SSRF egress allowlists). Do not hand-wave “sanitize input.”
+- **Reuse repo patterns:** Prefer existing `app/security/` helpers and provider adapters. Do not invent parallel utilities.
+- **Tests in the same change:** Plan for malformed, null, oversized, and authz-denied cases alongside the happy path.
+- **No silent defaults:** Forbid “TODO add auth later,” bare `except Exception: pass`, and new dependencies without lockfile update + justification.
+- **New `/v1` routes:** Authz, rate-limiting, and audit logging must be considered explicitly in the design.
+- **Secrets & trust:** Never hardcode secrets. Never trust client-side checks as authorization.
+
 ## When to Go Back
 
 If the research is missing critical information needed for design decisions — the questions missed an important area of the codebase — tell the user and suggest re-running `/qrspi/1_question` and `/qrspi/2_research` to fill the gap before proceeding with an incomplete design.

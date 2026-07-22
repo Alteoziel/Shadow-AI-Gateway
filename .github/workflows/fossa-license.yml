@@ -1,0 +1,31 @@
+name: FOSSA License Scan
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fossa:
+    name: FOSSA License Scan
+    runs-on: ubuntu-latest
+    # Secrets cannot be referenced in job-level `if:` — route through env instead.
+    env:
+      FOSSA_API_KEY: ${{ secrets.FOSSA_API_KEY }}
+
+    steps:
+      - name: Checkout
+        if: env.FOSSA_API_KEY != ''
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: FOSSA analyze
+        if: env.FOSSA_API_KEY != ''
+        uses: fossas/fossa-action@29693cc50323968e039056be419b32989fc5880c # v2.0.0
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+
+      - name: Skip notice when FOSSA_API_KEY unset
+        if: env.FOSSA_API_KEY == ''
+        run: echo "FOSSA_API_KEY is not set; skipping license scan."

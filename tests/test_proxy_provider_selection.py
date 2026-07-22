@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from app.main import app
 from fastapi.testclient import TestClient
+from tests.conftest import AUTH_HEADERS
 
 client = TestClient(app)
 
@@ -40,6 +41,7 @@ async def test_chat_uses_request_provider_after_interceptor_implemented():
     ):
         response = client.post(
             "/v1/chat/completions",
+            headers=AUTH_HEADERS,
             json={
                 "model": "claude-3-5-sonnet-latest",
                 "messages": [{"role": "user", "content": "ping"}],

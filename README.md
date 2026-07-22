@@ -4,6 +4,7 @@ Enterprise security proxy that sits between corporate users and public LLMs (Ope
 
 > **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger** — phases, checkpoints, guardrails.
 > **Task process:** [`.cursor/qrspi/`](.cursor/qrspi/) — mandatory QRSPI (see `AUTONOMOUS_MODE.md` + `CONTEXT_ISOLATION.md`).
+> **Security hardening:** human-only steps (secrets, Protect Main, FOSSA/Snyk, deploy keys) → [`SECURITY_OPERATOR_CHECKLIST.md`](SECURITY_OPERATOR_CHECKLIST.md).
 
 ## Pre-merge gate (AI Governance Engine)
 
@@ -45,11 +46,12 @@ Require status checks on `main`: **`Governance Steps 1–6`**, **`Enterprise Lay
 
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env — set OPENAI/ANTHROPIC keys AND a long random GATEWAY_API_KEY
 
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+# Or (preferred, frozen): curl -LsSf https://astral.sh/uv/install.sh | sh && uv sync --frozen --extra dev
 ```
 
 ### Run
@@ -64,10 +66,11 @@ Health check:
 curl http://localhost:8000/health
 ```
 
-Chat completion (returns `501` until Checkpoint #1 is filled):
+Chat completion (requires gateway API key):
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}'
 ```
@@ -106,8 +109,13 @@ pytest
 | `GATEWAY_HOST` | Bind host | `0.0.0.0` |
 | `GATEWAY_PORT` | Bind port | `8000` |
 | `LOG_LEVEL` | Logging level | `INFO` |
+| `GATEWAY_API_KEY` | Bearer / X-API-Key required for `/v1/*` | — (required) |
+| `GATEWAY_API_KEYS` | Optional comma-separated extra keys | — |
+| `GATEWAY_RATE_LIMIT_PER_MINUTE` | Per-key sliding window limit (`0` disables) | `60` |
 
 See `.env.example` for a copy-paste template.
+
+**Security hardening:** full operator click-path checklist → [`SECURITY_OPERATOR_CHECKLIST.md`](SECURITY_OPERATOR_CHECKLIST.md).
 
 ## Project layout
 
