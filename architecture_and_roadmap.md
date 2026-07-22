@@ -16,6 +16,7 @@
 **Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (required check on `main`)
 **Task workflow:** **QRSPI is mandatory** — see §5 and [`.cursor/qrspi/`](.cursor/qrspi/)
 **Product posture:** Open-source gateway + paid dashboard; Doppler secrets; BYOK upstream keys; hosting TBD — see §12.9
+**Discipline track:** NASA/JPL **Power of Ten** dual implementations — see §13 (human-owned; agents scaffold only)
 
 ---
 
@@ -152,6 +153,8 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 **What the human learns:** Web requests, `async`/`await`, API routing, HTTP status codes, environment variables.
 
+**Power of Ten spots (see §13):** message-list validation loop (Rules 1–2, 4–5, 7); correlation/header parse with explicit parameter checks (Rules 6–7).
+
 **Human checkpoint:** Intercepting the raw outbound client request payload **pre-flight** — implement `intercept_outbound_request(...)` before any upstream provider call.
 
 **Phase 1 technical contract:**
@@ -191,6 +194,8 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 **What the human learns:** Data scrubbing, string manipulation, tokenization, local text pipelines.
 
+**Power of Ten spots (see §13):** bounded scrub/redaction loop over prompt text (Rules 1–5); fixed-capacity findings buffer as the Rule 3 analogue (no unbounded growth on the hot path); tiny pure helpers ≤60 lines (Rule 4).
+
 **Human checkpoint:** The core string substitution / regex-NLP scrubbing array loop.
 
 ---
@@ -208,6 +213,8 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 
 **What the human learns:** SQL schemas, async connection pooling, data relationships, operational risk metrics.
 
+**Power of Ten spots (see §13):** insert helper that checks every return / rowcount and asserts schema invariants (Rules 5, 7); no recursive tree-walk of nested JSON audit payloads (Rule 1); bounded batch flush loops (Rule 2).
+
 **Human checkpoint:** Writing the raw SQL or ORM model insertion statement and constructing the analytics schema.
 
 ---
@@ -224,6 +231,8 @@ Status vocabulary: `not_started` | `in_progress` | `blocked_on_human` | `complet
 **What we build:** Production `Dockerfile` packaging + Terraform (`main.tf`) modeling the container in an AWS ECS / VPC private cloud network. (Phase 1 already ships staging stubs for Fly/Render.)
 
 **What the human learns:** Containerization, cloud networking, private subnets, infrastructure-as-code.
+
+**Power of Ten spots (see §13):** keep Terraform/resource helpers short and assertion-dense where we generate config in Python (Rules 4–5); treat `Dockerfile`/`main.tf` as “simple control flow” documents — no clever nested conditionals (Rule 1 analogue). Primary P10 dual-coding remains in Python modules; IaC is discipline practice, not a second language tax.
 
 **Human checkpoint:** Writing the core `Dockerfile` build instructions and defining the basic Terraform resources block.
 
@@ -329,6 +338,8 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 
 **Call site:** `app/api/v1/chat.py` must always invoke `intercept_outbound_request` before provider streaming.
 
+**§13 dual-study note:** Even after this function ships, complete Drill D-A (and optionally a `dual_study` rewrite pair) so the Power of Ten ↔ idiomatic comparison is hand-authored evidence — do not treat a past AI/assisted fill as the dual track.
+
 ---
 
 ## 7. Target Repository Layout
@@ -340,6 +351,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 ├── SETUP_GOVERNANCE.md
 ├── .cursor/qrspi/                       # Mandatory QRSPI playbooks
 ├── thoughts/qrspi/                      # Per-task QRSPI artifacts
+├── drills/power_of_ten/                 # §13 dual-implementation drills (human-owned bodies)
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml                       # Gateway (Phase 1+)
@@ -404,6 +416,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 12. **No merge to `main` without the `Governance Steps 1–6` check** (§11). Agents must not disable the workflow.
 13. **Dashboard may use Vercel; the streaming gateway may not.**
 14. **Comprehension quiz must be passed** (dashboard or local practice + honest understanding) before treating a PR as human-reviewed.
+15. **Power of Ten dual spots (§13)** — agents scaffold drills/tests only; humans hand-write both the P10-analogue and idiomatic implementations. Do not skip the P10 pass on `dual_required` spots.
 
 ---
 
@@ -416,6 +429,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | PostgreSQL metrics & audit trails | 3 | Schema + insert path (TBD) |
 | Docker + Terraform private cloud hosting | 4 | `Dockerfile` + `infra/terraform/main.tf` (stub landed; expand in Phase 4) |
 | Egress allowlist / audit trail readiness | 1→3 | `app/security/egress.py`, `app/security/audit.py` |
+| Safety-critical style dual coding (Power of Ten → idiomatic) | 1→3 | §13 drill pairs + applied spots in interceptor / scrub / audit |
 
 ---
 
@@ -433,6 +447,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | 2026-07-22 | Added §12 Open-Source Trust — enterprise adoption playbook for AI-assisted code | Senior Engineer (Grok 4.5) |
 | 2026-07-22 | Expanded §12 with AI-specific vulns (phantom deps, silent insecurity), human architecture audit, property-based testing targets, and secure prompt rules | Senior Engineer (Grok 4.5) |
 | 2026-07-22 | Added §12.9 product posture: OSS gateway + paid dashboard, Doppler secrets, BYOK upstream keys, hosting deferred | Senior Engineer (Grok 4.5) |
+| 2026-07-22 | Added §13 Power of Ten dual-implementation track: rule map, beginner ramp, concrete spots, human-owned drill protocol | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -650,3 +665,156 @@ Operators manage secrets in **Doppler** as the source of truth and sync them int
 Phase 1 already ships stubs (`Dockerfile`, `fly.toml`, `render.yaml`). **Final hosting choice is TBD** (Fly vs Render vs later AWS ECS/private VPC in Phase 4). Do not hard-block product work on picking a host; keep the gateway portable (Docker + env vars + Doppler sync). Revisit when traffic, streaming limits, and dashboard coupling are clearer.
 
 **Operator checklist cross-link:** human click-paths for secrets/CI remain in [`SECURITY_OPERATOR_CHECKLIST.md`](SECURITY_OPERATOR_CHECKLIST.md) once merged from the hardening line; until then, treat Doppler + BYOK above as Ledger law for secret design.
+
+---
+
+## 13. Power of Ten Dual-Implementation Track
+
+> **Goal:** For selected hot-path helpers, the human **hand-writes** a NASA/JPL [Power of Ten](https://spinroot.com/p10/index.html)–disciplined version, then **rewrites** the same behavior with normal modern Python. That proves two skills: safety-critical restraint *and* idiomatic engineering.
+>
+> **Honest constraint:** Power of Ten was written for safety-critical **C**. We use **rule analogues** in Python (and later optional tiny TS drills). We are not claiming flight-software certification — we are building resume-defensible judgment about bounds, assertions, scope, and checked returns.
+
+### 13.0 How this fits The Ledger
+
+| Rule | Binding? |
+|------|----------|
+| Agents may **scaffold** empty drill shells, cheat sheets, and tests that expect `NotImplementedError` | Yes |
+| Agents may **not** fill either side of a dual pair (`*_p10.py` or `*_idiomatic.py`) | Yes — same law as Human Hands-On checkpoints |
+| Production `app/` may keep the **idiomatic** implementation after the human finishes both sides | Yes |
+| Skipping the P10 pass and only shipping AI idiomatic code | **Not allowed** for spots marked `dual_required` below |
+
+### 13.1 The ten rules (working summary)
+
+Source: Gerard J. Holzmann, NASA/JPL — *The Power of Ten: Rules for Developing Safety-Critical Code* (IEEE Computer, 2006).
+
+| # | Rule (C original) | Python / gateway analogue |
+|---|-------------------|---------------------------|
+| 1 | Simple control flow only — no `goto` / `setjmp` / recursion | No recursion; no exception-as-control-flow gymnastics; straight `if` / bounded `for` / early `return` |
+| 2 | Every loop has a **fixed, statically obvious** upper bound | `for i in range(MAX_…)` or `while n < MAX_…`; never `while True` without a hard cap next to it |
+| 3 | No dynamic memory allocation after init | **Analogue:** no unbounded `list.append` / string concat on the hot path; prefer fixed-capacity buffers / early reject when over limit |
+| 4 | Functions ≤ ~60 lines | Split helpers; one job per function |
+| 5 | ≥ ~2 assertions per function (real invariants) | `assert` or explicit precondition checks that fail loudly; no `assert True` |
+| 6 | Declare data at smallest possible scope | Locals inside the tightest block; no module globals for scratch state |
+| 7 | Check non-void returns **and** validate parameters | Check `httpx` status, parse results, DB rowcounts; reject bad args before work |
+| 8 | Limit preprocessor to includes + simple macros | **Analogue:** no metaclass / decorator / dynamic-import magic in drill code; plain functions + constants |
+| 9 | Limit pointer dereference depth; no function pointers | **Analogue:** no deep `a["b"]["c"]["d"]` chains; use one-level field access or typed models; no callback-pointer soup |
+| 10 | All warnings on; zero warnings; strong static analysis | Ruff + Mypy (strictening) + Semgrep/CodeQL already in CI — drills must pass them clean |
+
+### 13.2 Dual protocol (how you code each spot)
+
+For every spot marked `dual_required`:
+
+1. **Read** the spot’s cheat sheet (3 bullets max) and the single Power of Ten rule focus.
+2. **Hand-write** `…_p10.py` (or the `p10_` function in a drill module) following the analogues in §13.1 — especially the listed rule focus.
+3. **Run** the tiny unit tests for that drill until green.
+4. **Hand-write** `…_idiomatic.py` with normal Python (comprehensions, early returns, pydantic/helpers OK) that passes the **same** tests.
+5. **Write 5–10 lines** in the drill README: what the P10 version forced you to notice, and what the idiomatic version improved (clarity / speed / ergonomics).
+6. Only then may the idiomatic logic be promoted into the real `app/` path (or keep drills as portfolio evidence beside production code).
+
+Agents stop at scaffolding. Filling either implementation is a **human** task.
+
+### 13.3 Beginner ramp (skill is the real blocker)
+
+You do not need to be fluent in TypeScript or “good at Python” before this track helps — the track **is** the practice. Follow this order; do **not** jump to Phase 2 scrub until Drill A–C are done by hand.
+
+| Step | What you do | Why it unblocks you |
+|------|-------------|---------------------|
+| 0 | Stay in **Python only** for weeks. Ignore `dashboard/` TS until Phase 1 dual drills feel boring. | One language tax at a time |
+| 1 | **Drill A** — validate a tiny `messages` list (copy of interceptor ideas, isolated) | Teaches loops + `if` + raising errors without FastAPI noise |
+| 2 | **Drill B** — `is_allowed_url`-style host check with asserts | Teaches Rule 5–7 on ~20 lines |
+| 3 | **Drill C** — bounded `while` prune of a timestamp window (rate-limit idea) | Teaches Rule 2 without async |
+| 4 | Re-read / optionally re-hand **Checkpoint #1** ideas as a dual pair in drills (even if production already works) | Separates “learning rewrite” from “shipping gate” |
+| 5 | **Checkpoint #2** scrub loop as the first **production** `dual_required` spot | Real resume artifact |
+| 6 | Phase 3 insert helper as second production dual spot | SQL + Rule 7 |
+| 7 | Optional later: one dashboard TS drill (parameter checks only) | Only after Python feels readable |
+
+**Frustration rule:** If a drill takes more than one focused session, **shrink the drill** (fewer rules, fewer lines) — do not abandon the track or switch languages. Agents may shrink scaffolds; they still must not write the bodies.
+
+**Study aids agents *may* leave in drill folders:**
+
+- A 3-bullet cheat sheet
+- One worked **non-gateway** toy example (e.g. bound a loop over `["a","b","c"]`) in comments
+- Tests that call your functions and assert behavior
+- `NotImplementedError` stubs for both `p10` and `idiomatic` entrypoints
+
+**Study aids agents must *not* leave:** full solutions, copied production implementations pasted into drill files, or “reference answer” branches.
+
+### 13.4 Spot map — where each rule earns its keep
+
+Status vocabulary: `planned` | `scaffold_ready` | `blocked_on_human` | `dual_complete`
+
+#### A. Isolated drills (start here — lowest intimidation)
+
+| ID | Spot | Primary rules | Proposed path | Dual? | Status |
+|----|------|---------------|---------------|-------|--------|
+| D-A | Message list validator | 1, 2, 4, 5, 7 | `drills/power_of_ten/a_messages/` | `dual_required` | `planned` |
+| D-B | HTTPS allowlist host check | 5, 6, 7, 9 | `drills/power_of_ten/b_egress/` | `dual_required` | `planned` |
+| D-C | Sliding-window prune loop | 2, 6 | `drills/power_of_ten/c_window_prune/` | `dual_required` | `planned` |
+| D-D | Fixed-capacity redaction buffer | 2, 3, 5 | `drills/power_of_ten/d_fixed_buffer/` | `dual_required` | `planned` |
+
+#### B. Production-adjacent spots (apply after drills)
+
+| ID | Spot | File / symbol | Primary rules | Dual? | Phase | Status |
+|----|------|---------------|---------------|-------|-------|--------|
+| P-1 | Pre-flight message validation | `app/proxy/interceptor.py` → `intercept_outbound_request` | 1, 2, 4, 5, 7 | `dual_study` (rewrite in drills OK even if prod landed) | 1 | `planned` |
+| P-2 | Anthropic payload mapping | `app/proxy/payloads.py` → `to_anthropic_payload` | 1, 4, 7, 9 | `dual_optional` | 1 | `planned` |
+| P-3 | Egress allowlist | `app/security/egress.py` → `is_allowed_url` / `assert_allowed_url` | 5, 6, 7 | `dual_optional` | 1 | `planned` |
+| P-4 | Rate-limit window prune | `app/security/rate_limit.py` → `_prune` | 2, 6 | `dual_optional` | 1 | `planned` |
+| P-5 | **Scrub / redaction loop** | `app/scrub/pipeline.py` → `scrub_prompt` | 1, 2, 3, 4, 5 | `dual_required` | 2 | `planned` |
+| P-6 | Finding / span recording | Phase 2 scrub helpers (TBD under `app/scrub/`) | 3, 5, 6 | `dual_required` | 2 | `planned` |
+| P-7 | Audit / metrics insert | Phase 3 insert path (TBD) | 5, 7 | `dual_required` | 3 | `planned` |
+| P-8 | Bounded audit batch flush | Phase 3 worker (TBD) | 1, 2, 4 | `dual_optional` | 3 | `planned` |
+| P-9 | Pedantic zero-warning pass | CI: Ruff / Mypy / Semgrep on drill + touched `app/` files | 10 | `always_on` | 1→4 | `partial` (CI landed; drills must enroll) |
+
+`dual_study` = human may complete the pair in `drills/` without ripping out working production code.  
+`dual_required` = both styles must exist (drill or side-by-side module) before calling that pillar “resume done.”  
+`dual_optional` = high learning value; do when the required track feels easy.
+
+#### C. Rule → best teaching spot (quick index)
+
+| Rule | Best first place to feel it |
+|------|-----------------------------|
+| 1 Simple control flow | D-A messages; P-5 scrub (no recursive NLP walks) |
+| 2 Bounded loops | D-C prune; P-5 scrub over `MAX_MATCHES` |
+| 3 No unbounded alloc | D-D fixed buffer; P-6 findings list with hard cap |
+| 4 Short functions | Split P-5 into `find_*` / `apply_*` / `scrub_prompt` |
+| 5 Assertions | D-B egress; every dual function’s pre/post conditions |
+| 6 Smallest scope | D-C; temps only inside the prune loop |
+| 7 Check returns & params | P-7 DB insert; P-2 payload mapping; httpx status in providers (read/study) |
+| 8 No magic | Drills forbid decorators/metaclasses; keep constants at module top |
+| 9 Shallow access | D-B / P-3 parse once → local `host`; no deep dict diving in scrub |
+| 10 Zero warnings | Every drill PR must keep Governance + Layers B–E green |
+
+### 13.5 Proposed drill layout (scaffold later; do not invent parallel apps)
+
+```text
+drills/
+└── power_of_ten/
+    ├── README.md                 # how to run dual protocol (§13.2)
+    ├── a_messages/
+    │   ├── p10.py                # HUMAN — NotImplementedError until filled
+    │   ├── idiomatic.py          # HUMAN — NotImplementedError until filled
+    │   ├── test_dual.py          # shared behavioral tests
+    │   └── NOTES.md              # HUMAN — 5–10 line comparison after both pass
+    ├── b_egress/
+    ├── c_window_prune/
+    └── d_fixed_buffer/
+```
+
+When scaffolding is requested, agents create the folders, stubs, and tests only. Update this section’s Status column to `scaffold_ready` / `blocked_on_human` accordingly.
+
+### 13.6 What you can truthfully say later
+
+After `dual_required` spots are complete:
+
+- Hand-authored safety-oriented variants of pre-flight validation and PII scrub loops under Power of Ten–inspired constraints (bounded loops, assertion density, checked parameters/returns).
+- Rewrote the same modules in idiomatic Python and documented tradeoffs.
+- Kept both under the same automated gates (lint, types, tests) — Rule 10 as habit, not slogan.
+
+### 13.7 Agent checklist for any §13 work
+
+1. Do **not** implement `p10.py` / `idiomatic.py` bodies.
+2. Do **not** “helpfully” paste a solution into `NOTES.md`.
+3. Do keep cheat sheets short (3 bullets) and tests behavioral (same I/O for both sides).
+4. Prefer shrinking a drill over adding TypeScript or new frameworks.
+5. After human completion, run tests + governance; mark status `dual_complete` in this section.
