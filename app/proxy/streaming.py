@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Awaitable, Callable
+import os
 
 import httpx
 from fastapi.responses import StreamingResponse
@@ -24,7 +25,7 @@ _ALLOWED_RELAY_HEADERS = frozenset(
 )
 
 # Soft cap on relayed bytes to bound slowloris-style streams (0 = unlimited).
-_MAX_RELAY_BYTES = int(__import__("os").getenv("GATEWAY_MAX_STREAM_BYTES", str(25 * 1024 * 1024)))
+_MAX_RELAY_BYTES = int(os.getenv("GATEWAY_MAX_STREAM_BYTES", str(25 * 1024 * 1024)))
 
 
 async def relay_sse_stream(

@@ -490,12 +490,12 @@ def test_chat_message_content_bounds() -> None:
 async def test_audit_sink_ring_buffer_drops_oldest() -> None:
     sink = InMemoryAuditSink(maxlen=2)
     set_audit_sink(sink)
-    await emit_audit(AuditEventType.AUTH_OK, correlation_id="a")
-    await emit_audit(AuditEventType.AUTH_OK, correlation_id="b")
-    await emit_audit(AuditEventType.AUTH_OK, correlation_id="c")
+    await emit_audit(AuditEventType.AUTH_OK, correlation_id="corr-alpha")
+    await emit_audit(AuditEventType.AUTH_OK, correlation_id="corr-bravo")
+    await emit_audit(AuditEventType.AUTH_OK, correlation_id="corr-charlie")
     assert len(sink.events) == 2
-    assert sink.events[0].correlation_id == "b"
-    assert sink.events[1].correlation_id == "c"
+    assert sink.events[0].correlation_id == "corr-bravo"
+    assert sink.events[1].correlation_id == "corr-charlie"
     sink.clear()
     assert sink.events == []
 

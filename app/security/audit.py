@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from threading import Lock
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -76,7 +77,7 @@ class InMemoryAuditSink:
     def __init__(self, *, maxlen: int = 10_000) -> None:
         self.events: list[AuditEvent] = []
         self._maxlen = maxlen
-        self._lock = __import__("threading").Lock()
+        self._lock = Lock()
 
     async def write(self, event: AuditEvent) -> AuditEvent:
         with self._lock:
