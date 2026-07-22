@@ -14,7 +14,7 @@ This list is for a **non-expert human operator**. Code and CI can automate a lot
 | Python lockfile (`uv.lock`) + frozen CI | **DONE IN REPO** | Confirm with §9 below; after changing deps run `uv lock` |
 | Gateway authz (API key) | **DONE IN REPO** | **YOU** must set `GATEWAY_API_KEY` in `.env` / hosting secrets (§4) |
 | Rate limiting | **DONE IN REPO** | Tune `GATEWAY_RATE_LIMIT_PER_MINUTE` if needed |
-| Coverage floor (85% now; ~91% measured; OSS bar ~95%) | **DONE IN REPO** (partial vs 95%) | Raise floor over time (§8) |
+| Coverage floor (98% now; ~99% measured) | **DONE IN REPO** | Maintain ≥98%; see §8 |
 | Streaming / provider failure tests | **DONE IN REPO** | Nothing |
 | Audit trail on request path (in-memory → Phase 3 DB) | **DONE IN REPO** | Nothing until Phase 3 Postgres |
 | Copyright signature DB expanded | **DONE IN REPO** | Optionally add more snippets later |
@@ -199,22 +199,18 @@ Code owners are people GitHub requires to approve changes to sensitive folders.
 
 ---
 
-## 8. How to raise the coverage floor further toward 95%
+## 8. Coverage floor (98%)
 
-**DONE IN REPO:** pytest coverage floor is configured in `pyproject.toml` (`--cov-fail-under`, currently **60**).  
-**YOU MUST DO THIS** (gradually) to raise the bar — after tests actually cover more code.
+**DONE IN REPO:** pytest coverage floor is `--cov-fail-under=98` in `pyproject.toml` (OSS bar was 95%; measured `app/` coverage is typically **~99%** with branch coverage on).
 
-Coverage floor = “CI fails if too little of `app/` is tested.” Raising it too fast without new tests will break CI.
+Coverage floor = “CI fails if too little of `app/` is tested.” Do not lower the floor to “make CI green.”
 
-1. Improve or add tests under `tests/` until local `pytest` reports coverage **above** the next target.
-2. Open `pyproject.toml`.
-3. Find the `addopts` list under `[tool.pytest.ini_options]`.
-4. Change `--cov-fail-under=60` to a higher number in small steps (examples: `70`, then `80`, then toward `95`).
-5. Run `pytest` locally; only commit the floor bump when it still passes.
-6. Prefer raising after real test gains — do not lower the floor to “make CI green.”
+1. Keep adding or improving tests under `tests/` when you add `app/` code.
+2. Run `GATEWAY_API_KEY=test-gateway-key python3 -m pytest tests -q --cov=app --cov-report=term-missing`.
+3. Only raise `--cov-fail-under` further after coverage is stably above that number.
 
-- [ ] Coverage improved with real tests
-- [ ] `--cov-fail-under` raised in a deliberate step toward 95
+- [x] Coverage improved with real tests
+- [x] `--cov-fail-under` raised to **98** (above the 95% OSS bar)
 
 ---
 
