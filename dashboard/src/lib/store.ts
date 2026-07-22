@@ -279,16 +279,19 @@ export function gradeComprehension(
   >;
 } {
   const questions = pack.questions ?? [];
-  const total = questions.length;
-  let correct = 0;
   const coding: Record<
     string,
     { passed: boolean; passedTests: number; totalTests: number; errors: string[] }
   > = {};
 
+  // Only multiple-choice questions count toward the auto-pass score.
+  // Coding challenges are structural-feedback only (no server-side execution).
+  let correct = 0;
+  let scoredTotal = 0;
+
   for (const q of questions) {
     if (q.question_type === "coding") {
-      const result = gradeCodingSubmission(
+      coding[q.id] = gradeCodingSubmission(
         {
           id: q.id,
           question_type: "coding",
@@ -297,15 +300,16 @@ export function gradeComprehension(
         },
         codingSubmissions[q.id] || ""
       );
-      coding[q.id] = result;
-      if (result.passed) correct += 1;
-    } else if (answers[q.id] === q.answer_index) {
+      continue;
+    }
+    scoredTotal += 1;
+    if (answers[q.id] === q.answer_index) {
       correct += 1;
     }
   }
 
-  const score = total ? correct / total : 0;
-  // Enforce a floor so ingest cannot set pass_threshold: 0 to auto-pass.
+  // If the pack is coding-only, do not auto-pass (would be a free bypass).
+  const score = scoredTotal ? correct / scoredTotal : 0;
   const threshold = Math.min(
     1,
     Math.max(MIN_PASS_THRESHOLD, Number(pack.pass_threshold) || MIN_PASS_THRESHOLD)
@@ -313,8 +317,8 @@ export function gradeComprehension(
   return {
     score,
     correct,
-    total,
-    passed: score >= threshold,
+    total: scoredTotal,
+    passed: scoredTotal > 0 && score >= threshold,
     threshold,
     at: new Date().toISOString(),
     coding,

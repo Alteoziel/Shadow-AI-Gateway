@@ -542,8 +542,8 @@ function ComprehensionPanel({ review }: { review: Review }) {
                     </p>
                   ) : (
                     <p className="text-xs text-mist">
-                      Structural preview only — full tests run on quiz submit
-                      (server sandbox). All must pass before you can approve.
+                      Structural check only — server does not execute coding
+                      submissions. Quiz pass is based on multiple-choice.
                     </p>
                   )}
                 </div>
