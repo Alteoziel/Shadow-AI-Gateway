@@ -29,17 +29,14 @@ def _configured_keys(settings: Settings) -> frozenset[str]:
 
 
 def key_fingerprint(token: str) -> str:
-    """Non-reversible short id for audit / rate-limit buckets.
-
-    Not password hashing — produces a short opaque id for audit events and
-    rate-limit buckets. CodeQL flags any fast hash of key-like material;
-    suppress with that intent documented.
-    """
-    return hashlib.blake2b(
-        token.encode("utf-8"),  # codeql[py/weak-sensitive-data-hashing] API-key telemetry fingerprint, not password verification
-        digest_size=8,
-        person=b"gw-key-id-v1",
-    ).hexdigest()
+    """Short opaque id for audit / rate-limit buckets (not password storage)."""
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        token.encode("utf-8"),
+        salt=b"shadow-ai-gateway-key-id-v1",
+        iterations=10_000,
+        dklen=8,
+    ).hex()
 
 
 def _constant_time_match(provided: str, allowed: frozenset[str]) -> bool:
