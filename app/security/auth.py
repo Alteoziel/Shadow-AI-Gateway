@@ -31,12 +31,12 @@ def _configured_keys(settings: Settings) -> frozenset[str]:
 def key_fingerprint(token: str) -> str:
     """Non-reversible short id for audit / rate-limit buckets.
 
-    BLAKE2b keyed with a domain separation string — fingerprinting for
-    telemetry buckets, not password storage / verification (avoids
-    CodeQL py/weak-sensitive-data-hashing on SHA-family digests).
+    Not password hashing — produces a short opaque id for audit events and
+    rate-limit buckets. CodeQL flags any fast hash of key-like material;
+    suppress with that intent documented.
     """
     return hashlib.blake2b(
-        token.encode("utf-8"),
+        token.encode("utf-8"),  # codeql[py/weak-sensitive-data-hashing] API-key telemetry fingerprint, not password verification
         digest_size=8,
         person=b"gw-key-id-v1",
     ).hexdigest()

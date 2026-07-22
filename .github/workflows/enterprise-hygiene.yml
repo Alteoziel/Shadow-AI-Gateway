@@ -127,7 +127,8 @@ jobs:
           GATEWAY_API_KEY: test-gateway-key
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          uv run pytest -q
+          # python -m ensures repo root is on sys.path for `import tests.conftest`
+          uv run python -m pytest -q
 
       # ── Layer E: container + IaC ────────────────────────────────────
       - name: "E · Build gateway image"
