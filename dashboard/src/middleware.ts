@@ -5,6 +5,7 @@ import {
   sitePassword,
   verifySiteSessionToken,
 } from "@/lib/siteAuth";
+import { secretsMatch, isProductionLike } from "@/lib/auth";
 
 export const config = {
   matcher: [
@@ -19,7 +20,8 @@ function isAuthPublicPath(pathname: string): boolean {
   return (
     pathname === "/login" ||
     pathname === "/api/auth/login" ||
-    pathname === "/api/auth/logout"
+    pathname === "/api/auth/logout" ||
+    pathname === "/api/health"
   );
 }
 
@@ -34,8 +36,8 @@ function hasGovernanceMachineAuth(req: NextRequest): boolean {
     req.headers.get("x-governance-reviewer-secret") ||
     req.headers.get("x-governance-secret");
 
-  if (dashboard && ingest === dashboard) return true;
-  if (reviewer && review === reviewer) return true;
+  if (dashboard && secretsMatch(ingest, dashboard)) return true;
+  if (reviewer && secretsMatch(review, reviewer)) return true;
   return false;
 }
 
@@ -59,12 +61,35 @@ function unauthorizedApi(): NextResponse {
   );
 }
 
+function misconfigured(): NextResponse {
+  return NextResponse.json(
+    {
+      error: "misconfigured",
+      message:
+        "Set GOVERNANCE_SITE_PASSWORD for production dashboard access (or use machine auth headers on APIs).",
+    },
+    { status: 503 },
+  );
+}
+
 export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  // Production/Vercel: site gate must be configured (fail closed for humans).
+  if (isProductionLike() && !siteGateEnabled()) {
+    if (isAuthPublicPath(pathname) || hasGovernanceMachineAuth(req)) {
+      return NextResponse.next();
+    }
+    if (pathname.startsWith("/api/")) {
+      return misconfigured();
+    }
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+
   if (!siteGateEnabled()) {
     return NextResponse.next();
   }
 
-  const { pathname } = req.nextUrl;
   if (isAuthPublicPath(pathname)) {
     return NextResponse.next();
   }

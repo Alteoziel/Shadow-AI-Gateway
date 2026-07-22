@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  authorizeIngest,
   authorizeReviewer,
+  isProductionLike,
   unauthorizedResponse,
 } from "@/lib/auth";
 import {
@@ -11,16 +13,34 @@ import {
 import {
   getReview,
   updateReview,
+  updateReviewConditional,
   gradeComprehension,
   sanitizeReviewForClient,
 } from "@/lib/store";
+import {
+  authorizeReviewRead,
+  siteGateMisconfiguredResponse,
+} from "@/lib/reviewAuth";
+import { siteGateEnabled } from "@/lib/siteAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: NextRequest, { params }: Params) {
+const MAX_CODING_SOURCE = 32_768;
+const TERMINAL_STATUSES = new Set(["approved", "merged", "rejected"]);
+
+export async function GET(req: NextRequest, { params }: Params) {
+  if (isProductionLike() && !siteGateEnabled()) {
+    if (!authorizeIngest(req) && !authorizeReviewer(req)) {
+      return siteGateMisconfiguredResponse();
+    }
+  }
+  if (!(await authorizeReviewRead(req))) {
+    return unauthorizedResponse("ingest");
+  }
+
   const { id } = await params;
   const review = await getReview(id);
   if (!review) {
@@ -58,6 +78,15 @@ export async function POST(req: NextRequest, { params }: Params) {
   const note = (body.note as string) || null;
 
   if (action === "submit_quiz") {
+    if (TERMINAL_STATUSES.has(review.status)) {
+      return NextResponse.json(
+        {
+          error: "invalid_state",
+          message: `Cannot retake quiz when review status is ${review.status}.`,
+        },
+        { status: 409 }
+      );
+    }
     if (!review.comprehension) {
       return NextResponse.json(
         {
@@ -73,6 +102,23 @@ export async function POST(req: NextRequest, { params }: Params) {
       string,
       string
     >;
+    for (const [qid, src] of Object.entries(codingSubmissions)) {
+      if (typeof src !== "string") {
+        return NextResponse.json(
+          { error: "invalid_coding_submission", message: `Bad source for ${qid}` },
+          { status: 400 }
+        );
+      }
+      if (Buffer.byteLength(src, "utf8") > MAX_CODING_SOURCE) {
+        return NextResponse.json(
+          {
+            error: "coding_source_too_large",
+            message: `Coding submission for ${qid} exceeds ${MAX_CODING_SOURCE} bytes.`,
+          },
+          { status: 413 }
+        );
+      }
+    }
     const attempt = gradeComprehension(
       review.comprehension,
       answers,
@@ -103,7 +149,14 @@ export async function POST(req: NextRequest, { params }: Params) {
           id: q.id,
           correct: Boolean(c?.passed),
           explanation: q.explanation,
-          coding: c ?? null,
+          coding: c
+            ? {
+                passed: c.passed,
+                passedTests: c.passedTests,
+                totalTests: c.totalTests,
+                errors: c.errors,
+              }
+            : null,
         };
       }
       return {
@@ -115,7 +168,14 @@ export async function POST(req: NextRequest, { params }: Params) {
 
     return NextResponse.json({
       review: updated ? sanitizeReviewForClient(updated) : null,
-      attempt,
+      attempt: {
+        score: attempt.score,
+        correct: attempt.correct,
+        total: attempt.total,
+        passed: attempt.passed,
+        threshold: attempt.threshold,
+        at: attempt.at,
+      },
       explanations,
       quiz_status: quizStatus,
     });
@@ -159,12 +219,29 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   if (action === "approve") {
-    const updated = await updateReview(id, {
-      status: "approved",
-      reviewer_note: note,
-    });
+    const updated = await updateReviewConditional(
+      id,
+      (current) =>
+        Boolean(current.comprehension) &&
+        Boolean(current.comprehension_passed) &&
+        current.status !== "merged",
+      {
+        status: "approved",
+        reviewer_note: note,
+      }
+    );
+    if (!updated) {
+      return NextResponse.json(
+        {
+          error: "comprehension_required",
+          message:
+            "Approve blocked: comprehension must still be passed (concurrent update?).",
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({
-      review: updated ? sanitizeReviewForClient(updated) : null,
+      review: sanitizeReviewForClient(updated),
     });
   }
 
@@ -217,22 +294,48 @@ export async function POST(req: NextRequest, { params }: Params) {
       }),
     });
 
-    const mergeJson = await mergeResp.json().catch(() => ({}));
+    const mergeJson = (await mergeResp.json().catch(() => ({}))) as {
+      sha?: string;
+      message?: string;
+    };
     if (!mergeResp.ok) {
       return NextResponse.json(
-        { error: "github_merge_failed", details: mergeJson },
+        {
+          error: "github_merge_failed",
+          message:
+            typeof mergeJson.message === "string"
+              ? mergeJson.message.slice(0, 200)
+              : "GitHub merge failed",
+          github_status: mergeResp.status,
+        },
         { status: 502 }
       );
     }
 
-    const updated = await updateReview(id, {
-      status: "merged",
-      merge_sha: mergeJson.sha ?? null,
-      reviewer_note: note,
-    });
+    const updated = await updateReviewConditional(
+      id,
+      (current) =>
+        Boolean(current.comprehension_passed) &&
+        current.passed === true &&
+        current.status !== "merged",
+      {
+        status: "merged",
+        merge_sha: mergeJson.sha ?? null,
+        reviewer_note: note,
+      }
+    );
+    if (!updated) {
+      return NextResponse.json(
+        {
+          error: "invalid_state",
+          message: "Merge blocked by concurrent state change.",
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({
-      review: updated ? sanitizeReviewForClient(updated) : null,
-      merge: mergeJson,
+      review: sanitizeReviewForClient(updated),
+      merge: { sha: mergeJson.sha ?? null, ok: true },
     });
   }
 

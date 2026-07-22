@@ -1,7 +1,31 @@
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
 from fastapi.responses import StreamingResponse
+
+_ALLOWED_RELAY_HEADERS = frozenset(
+    {
+        "content-type",
+        "cache-control",
+        "x-request-id",
+        "x-openai-request-id",
+        "openai-organization",
+        "openai-processing-ms",
+        "openai-version",
+        "anthropic-ratelimit-requests-limit",
+        "anthropic-ratelimit-requests-remaining",
+        "anthropic-ratelimit-requests-reset",
+        "anthropic-ratelimit-tokens-limit",
+        "anthropic-ratelimit-tokens-remaining",
+        "anthropic-ratelimit-tokens-reset",
+        "request-id",
+        "retry-after",
+    }
+)
+
+# Soft cap on relayed bytes to bound slowloris-style streams (0 = unlimited).
+_MAX_RELAY_BYTES = int(os.getenv("GATEWAY_MAX_STREAM_BYTES", str(25 * 1024 * 1024)))
 
 
 async def relay_sse_stream(
@@ -22,23 +46,29 @@ async def relay_sse_stream(
     """
 
     async def _iter_chunks() -> AsyncIterator[bytes]:
+        sent = 0
         try:
             async for chunk in upstream.aiter_bytes():
+                sent += len(chunk)
+                if _MAX_RELAY_BYTES > 0 and sent > _MAX_RELAY_BYTES:
+                    break
                 yield chunk
         finally:
             await upstream.aclose()
             if on_complete is not None:
                 await on_complete()
 
+    headers = {
+        key: value
+        for key, value in upstream.headers.items()
+        if key.lower() in _ALLOWED_RELAY_HEADERS
+    }
+
     return StreamingResponse(
         _iter_chunks(),
         status_code=upstream.status_code,
         media_type=media_type,
-        headers={
-            key: value
-            for key, value in upstream.headers.items()
-            if key.lower() not in {"content-length", "transfer-encoding", "connection"}
-        },
+        headers=headers,
     )
 
 

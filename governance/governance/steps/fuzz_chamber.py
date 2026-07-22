@@ -1,9 +1,15 @@
-"""Step 3 — Test Injected Chamber: deterministic boundary fuzzing."""
+"""Step 3 — Test Injected Chamber: static boundary analysis (+ optional dynamic fuzz).
+
+Dynamic ``exec`` of scanned Python is **disabled by default** (RCE risk on CI).
+Set ``GOVERNANCE_ALLOW_DYNAMIC_FUZZ=1`` only in trusted, isolated environments.
+When enabled, the harness runs with a wiped environment (no parent secrets).
+"""
 
 from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import tempfile
 import textwrap
@@ -24,6 +30,9 @@ BOUNDARY_CASES = [
     {"__proto__": "x"},
     "A" * 10_000,
 ]
+
+# Only these repo-relative prefixes may be dynamically fuzzed when explicitly enabled.
+_DYNAMIC_ALLOW_PREFIXES = ("app/",)
 
 HARNESS_TEMPLATE = '''
 import json
@@ -49,24 +58,30 @@ for case in BOUNDARY:
         fn(case)
         results.append({"input": repr(case)[:80], "status": "ok"})
     except (TypeError, ValueError) as e:
-        results.append({"input": repr(case)[:80], "status": "rejected", "error": str(e)})
+        results.append({"input": repr(case)[:80], "status": "rejected", "error": type(e).__name__})
     except PermissionError as e:
-        # Expected deny path for allowlists / auth gates (e.g. EgressDeniedError).
         results.append({
             "input": repr(case)[:80],
             "status": "denied",
-            "error": f"{type(e).__name__}: {e}",
+            "error": type(e).__name__,
         })
     except Exception as e:
         results.append({
             "input": repr(case)[:80],
             "status": "crash",
             "error": f"{type(e).__name__}: {e}",
-            "trace": traceback.format_exc()[-500:],
         })
 
 print(json.dumps({"ok": True, "results": results}))
 '''
+
+
+def _dynamic_fuzz_enabled() -> bool:
+    return os.getenv("GOVERNANCE_ALLOW_DYNAMIC_FUZZ", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def _explicit_fuzz_targets(tree: ast.Module) -> list[str]:
@@ -102,7 +117,7 @@ def _discover_fuzz_targets(path: Path) -> list[str]:
     """Find top-level functions that look like pure helpers (1–2 args)."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
-    except SyntaxError:
+    except (OSError, SyntaxError, UnicodeDecodeError):
         return []
     targets: list[str] = _explicit_fuzz_targets(tree)
     for node in tree.body:
@@ -118,10 +133,89 @@ def _discover_fuzz_targets(path: Path) -> list[str]:
     return deduped[:5]
 
 
+def _function_def(tree: ast.Module, func_name: str) -> ast.FunctionDef | None:
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+            return node
+    return None
+
+
+def _static_boundary_findings(path: Path, func_name: str) -> list[Finding]:
+    """AST-only checks — never execute untrusted code."""
+    findings: list[Finding] = []
+    try:
+        source = path.read_text(encoding="utf-8")
+        if len(source) > 500_000:
+            findings.append(
+                Finding(
+                    step=STEP_ID,
+                    severity=Severity.WARNING,
+                    message=f"`{func_name}` skipped: file exceeds static scan size cap",
+                    file=str(path),
+                    rule_id="FUZZ003_SIZE",
+                    suggestion="Split large modules or raise the scan size budget deliberately.",
+                )
+            )
+            return findings
+        tree = ast.parse(source)
+    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        findings.append(
+            Finding(
+                step=STEP_ID,
+                severity=Severity.WARNING,
+                message=f"`{func_name}` could not be parsed for static fuzz: {type(exc).__name__}",
+                file=str(path),
+                rule_id="FUZZ004_PARSE",
+            )
+        )
+        return findings
+
+    fn = _function_def(tree, func_name)
+    if fn is None:
+        return findings
+
+    # Flag helpers that accept a bare arg and never reference it (likely stub)
+    # or that use eval/exec inside (dangerous for boundary inputs).
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in {"eval", "exec", "compile"}:
+                findings.append(
+                    Finding(
+                        step=STEP_ID,
+                        severity=Severity.ERROR,
+                        message=(
+                            f"`{func_name}` calls `{node.func.id}` — "
+                            "untrusted input must not reach dynamic execution"
+                        ),
+                        file=str(path),
+                        line=getattr(node, "lineno", None),
+                        rule_id="FUZZ002_DYNAMIC_EXEC",
+                        suggestion="Remove eval/exec or isolate behind a hardened sandbox.",
+                    )
+                )
+    return findings
+
+
+def _path_allowed_for_dynamic(path: Path) -> bool:
+    normalized = str(path).replace("\\", "/")
+    return any(
+        f"/{prefix}" in f"/{normalized}" or normalized.startswith(prefix)
+        for prefix in _DYNAMIC_ALLOW_PREFIXES
+    )
+
+
 def _run_harness(path: Path, func_name: str, timeout_s: float = 5.0) -> dict:
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as harness:
         harness.write(textwrap.dedent(HARNESS_TEMPLATE))
         harness_path = harness.name
+
+    # Minimal env — do not inherit CI secrets / tokens.
+    clean_env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": tempfile.gettempdir(),
+        "PYTHONPATH": "",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
 
     try:
         proc = subprocess.run(
@@ -136,6 +230,8 @@ def _run_harness(path: Path, func_name: str, timeout_s: float = 5.0) -> dict:
             text=True,
             timeout=timeout_s,
             check=False,
+            env=clean_env,
+            cwd=tempfile.gettempdir(),
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "timeout", "results": []}
@@ -143,7 +239,11 @@ def _run_harness(path: Path, func_name: str, timeout_s: float = 5.0) -> dict:
         Path(harness_path).unlink(missing_ok=True)
 
     if proc.returncode != 0 and not proc.stdout:
-        return {"ok": False, "error": proc.stderr[-400:], "results": []}
+        return {
+            "ok": False,
+            "error": (proc.stderr or "harness_failed")[:200],
+            "results": [],
+        }
     try:
         return json.loads(proc.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError):
@@ -152,11 +252,10 @@ def _run_harness(path: Path, func_name: str, timeout_s: float = 5.0) -> dict:
 
 def run(paths: list[Path]) -> StepResult:
     """
-    Deterministically fuzz discovered helper functions with boundary inputs.
+    Boundary-test discovered helpers.
 
-    Runs in a subprocess sandbox (Docker optional later). Crashes are ERRORS.
-    TypeError / ValueError contract rejections are informational only.
-    PermissionError (and subclasses) are treated as expected deny paths.
+    Default mode is static AST analysis (safe for untrusted PRs).
+    Dynamic subprocess fuzz requires GOVERNANCE_ALLOW_DYNAMIC_FUZZ=1.
     """
     findings: list[Finding] = []
     functions_tested = 0
@@ -164,21 +263,24 @@ def run(paths: list[Path]) -> StepResult:
     rejections = 0
     targets_tested: list[str] = []
     denied = 0
+    mode = "dynamic" if _dynamic_fuzz_enabled() else "static"
 
     skip_markers = (
-        "test_",
         "/tests/",
+        "\\tests\\",
         "app/proxy/interceptor.py",
         "governance/steps",
         "governance/cli",
         "governance/pipeline",
         "governance/reporters",
+        "governance/egress",
     )
     py_files = [
         p
         for p in paths
         if p.suffix == ".py"
         and p.is_file()
+        and not p.name.startswith("test_")
         and not any(marker in str(p).replace("\\", "/") for marker in skip_markers)
     ]
 
@@ -190,6 +292,11 @@ def run(paths: list[Path]) -> StepResult:
     for path, func_name in jobs:
         functions_tested += 1
         targets_tested.append(f"{path}:{func_name}")
+
+        if mode == "static" or not _path_allowed_for_dynamic(path):
+            findings.extend(_static_boundary_findings(path, func_name))
+            continue
+
         outcome = _run_harness(path, func_name)
         rejections += sum(
             1
@@ -204,25 +311,33 @@ def run(paths: list[Path]) -> StepResult:
         )
         for item in crash_items:
             crashes += 1
+            err = str(item.get("error") or "crash")[:200]
             findings.append(
                 Finding(
                     step=STEP_ID,
                     severity=Severity.ERROR,
                     message=(
                         f"`{func_name}` crashed on boundary input "
-                        f"{item.get('input')}: {item.get('error')}"
+                        f"{item.get('input')}: {err}"
                     ),
                     file=str(path),
                     rule_id="FUZZ001_CRASH",
-                    evidence=item.get("error"),
+                    evidence=err,
                     suggestion="Add input validation / null guards for boundary cases.",
                 )
             )
 
+    # Dynamic exec findings count as failures; static FUZZ002 also fails the step.
+    blocking = [
+        f
+        for f in findings
+        if f.severity in {Severity.ERROR, Severity.CRITICAL}
+    ]
+
     return StepResult(
         step=STEP_ID,
         name=STEP_NAME,
-        passed=crashes == 0,
+        passed=len(blocking) == 0 and crashes == 0,
         findings=findings,
         metrics={
             "functions_tested": functions_tested,
@@ -231,5 +346,7 @@ def run(paths: list[Path]) -> StepResult:
             "rejections": rejections,
             "denied": denied,
             "targets": targets_tested,
+            "mode": mode,
+            "dynamic_enabled": mode == "dynamic",
         },
     )

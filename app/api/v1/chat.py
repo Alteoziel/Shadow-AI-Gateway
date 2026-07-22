@@ -86,7 +86,13 @@ async def chat_completions(
     _rate_key: Annotated[str, Depends(enforce_rate_limit)],
 ) -> JSONResponse | StreamingResponse:
     raw_body = request_body.model_dump(exclude_none=True)
-    headers = {key: value for key, value in request.headers.items()}
+    # Do not forward caller auth material into the interceptor / provider path.
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower()
+        not in {"authorization", "x-api-key", "cookie", "set-cookie"}
+    }
     correlation_id = getattr(request.state, "correlation_id", "unknown")
     key_id = getattr(request.state, "gateway_key_id", _auth_key)
 

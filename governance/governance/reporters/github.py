@@ -121,8 +121,14 @@ def post_to_dashboard(report: PipelineReport) -> dict[str, Any] | None:
     endpoint = os.getenv("GOVERNANCE_DASHBOARD_URL")
     if not endpoint:
         return None
+    from governance.egress import EgressDeniedError, assert_allowed_dashboard_url
+
+    try:
+        endpoint = assert_allowed_dashboard_url(endpoint)
+    except EgressDeniedError as exc:
+        return {"ok": False, "error": str(exc)}
     secret = os.getenv("GOVERNANCE_DASHBOARD_SECRET", "")
-    url = f"{endpoint.rstrip('/')}/api/reviews"
+    url = f"{endpoint}/api/reviews"
     try:
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(
@@ -139,7 +145,7 @@ def post_to_dashboard(report: PipelineReport) -> dict[str, Any] | None:
                     "error": (
                         "401 Unauthorized — GOVERNANCE_DASHBOARD_SECRET in GitHub "
                         "Actions must exactly match GOVERNANCE_DASHBOARD_SECRET on "
-                        f"the dashboard host ({endpoint.rstrip('/')})."
+                        f"the dashboard host ({endpoint})."
                     ),
                 }
             resp.raise_for_status()
@@ -170,14 +176,20 @@ def post_quiz_commit_status(
     if state not in {"pending", "success", "failure", "error"}:
         state = "pending"
 
-    dashboard = (os.getenv("GOVERNANCE_DASHBOARD_URL") or "").rstrip("/")
+    dashboard_raw = (os.getenv("GOVERNANCE_DASHBOARD_URL") or "").rstrip("/")
     payload: dict[str, Any] = {
         "state": state,
         "context": QUIZ_STATUS_CONTEXT,
         "description": description[:140],
     }
-    if dashboard:
-        payload["target_url"] = dashboard[:1024]
+    if dashboard_raw:
+        from governance.egress import EgressDeniedError, assert_allowed_dashboard_url
+
+        try:
+            dashboard = assert_allowed_dashboard_url(dashboard_raw)
+            payload["target_url"] = dashboard[:1024]
+        except EgressDeniedError:
+            pass
 
     url = f"https://api.github.com/repos/{repo}/statuses/{sha}"
     try:

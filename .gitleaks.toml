@@ -16,4 +16,6 @@ regexes = [
   '''change-me-to-a-long-random-string''',
   '''your_.*_here''',
   '''sk-live-aaaaaaaaaaaaaaaaaaaaaaaa''',
+  # False positive: keyword arg name matched as generic-api-key secret.
+  '''correlation_id\s*=''',
 ]

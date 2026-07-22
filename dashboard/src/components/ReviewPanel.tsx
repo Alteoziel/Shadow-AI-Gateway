@@ -194,13 +194,17 @@ function renderQuizPrompt(prompt: string) {
         </pre>
       );
     }
+    // Safe bold rendering — never inject HTML from quiz prompts (XSS).
+    const chunks = part.split(/(\*\*[\s\S]*?\*\*)/g);
     return (
-      <span
-        key={i}
-        dangerouslySetInnerHTML={{
-          __html: part.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
-        }}
-      />
+      <span key={i}>
+        {chunks.map((chunk, j) => {
+          if (chunk.startsWith("**") && chunk.endsWith("**") && chunk.length >= 4) {
+            return <strong key={j}>{chunk.slice(2, -2)}</strong>;
+          }
+          return <span key={j}>{chunk}</span>;
+        })}
+      </span>
     );
   });
 }
@@ -538,7 +542,8 @@ function ComprehensionPanel({ review }: { review: Review }) {
                     </p>
                   ) : (
                     <p className="text-xs text-mist">
-                      Click “Run tests” — all must pass before you can submit.
+                      Structural preview only — full tests run on quiz submit
+                      (server sandbox). All must pass before you can approve.
                     </p>
                   )}
                 </div>

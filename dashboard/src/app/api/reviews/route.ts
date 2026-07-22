@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   authorizeIngest,
+  isProductionLike,
   unauthorizedResponse,
 } from "@/lib/auth";
 import { parseIngestBody } from "@/lib/ingest";
@@ -14,11 +15,26 @@ import {
   upsertReview,
   sanitizeReviewForClient,
 } from "@/lib/store";
+import {
+  authorizeReviewRead,
+  siteGateMisconfiguredResponse,
+} from "@/lib/reviewAuth";
+import { siteGateEnabled } from "@/lib/siteAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (isProductionLike() && !siteGateEnabled()) {
+    // Machine auth can still list; otherwise fail closed.
+    if (!authorizeIngest(req)) {
+      return siteGateMisconfiguredResponse();
+    }
+  }
+  if (!(await authorizeReviewRead(req))) {
+    return unauthorizedResponse("ingest");
+  }
+
   const reviews = await listReviews();
   return NextResponse.json({
     reviews: reviews.map(sanitizeReviewForClient),

@@ -10,6 +10,12 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: GATEWAY_API_KEY
+        sync: false
+      - key: GATEWAY_API_KEYS
+        sync: false
+      - key: GATEWAY_RATE_LIMIT_PER_MINUTE
+        value: "60"
       - key: DEFAULT_PROVIDER
         value: openai
       - key: GATEWAY_HOST

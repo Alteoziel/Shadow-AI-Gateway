@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from threading import Lock
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -73,15 +74,23 @@ class AuditSink(Protocol):
 class InMemoryAuditSink:
     """Dev/test / Phase-1 sink until Supabase is wired in Phase 3."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, maxlen: int = 10_000) -> None:
         self.events: list[AuditEvent] = []
+        self._maxlen = maxlen
+        self._lock = Lock()
 
     async def write(self, event: AuditEvent) -> AuditEvent:
-        self.events.append(event)
+        with self._lock:
+            self.events.append(event)
+            if len(self.events) > self._maxlen:
+                # Drop oldest — ring-buffer behavior until Postgres.
+                overflow = len(self.events) - self._maxlen
+                del self.events[:overflow]
         return event
 
     def clear(self) -> None:
-        self.events.clear()
+        with self._lock:
+            self.events.clear()
 
 
 _sink: InMemoryAuditSink = InMemoryAuditSink()

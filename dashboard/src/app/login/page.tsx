@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 function safeNextPath(raw: string | null): string {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/";
+  if (raw.includes("\\") || raw.includes("\0")) return "/";
+  if (!/^\/[A-Za-z0-9._~/-]*$/.test(raw)) return "/";
   if (raw.startsWith("/login")) return "/";
   return raw;
 }
