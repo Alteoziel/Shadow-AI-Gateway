@@ -10,11 +10,12 @@
 > - If a Human Hands-On checkpoint is open, agents **must not** fill it.
 > - Read this file **before** any developmental cycle. Keep phase/checkpoint status current.
 
-**Last updated:** 2026-07-20  
+**Last updated:** 2026-07-22  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
 **Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (required check on `main`)
 **Task workflow:** **QRSPI is mandatory** — see §5 and [`.cursor/qrspi/`](.cursor/qrspi/)
+**Product posture:** Open-source gateway + paid dashboard; Doppler secrets; BYOK upstream keys; hosting TBD — see §12.9
 
 ---
 
@@ -429,6 +430,9 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | 2026-07-20 | Hardened Layers B–E: SHA-pinned Actions, checksummed Gitleaks, Semgrep packs hard-fail, Trivy CRITICAL+HIGH + SBOM, CodeQL upload, `EgressCheckedAsyncClient`, non-root image, coverage ≥60% | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Operator: Dependabot + Code scanning enabled; Protect Main tightened (strict checks, last-push approval, signed commits); CodeQL `upload: true` | Human + Senior Engineer |
 | 2026-07-20 | Advanced Code scanning: tuned `codeql.yml` (`security-extended`, `CodeQL (Layer C)` check name, SARIF upload); removed duplicate CodeQL job from hygiene workflow | Senior Engineer (Grok 4.5) |
+| 2026-07-22 | Added §12 Open-Source Trust — enterprise adoption playbook for AI-assisted code | Senior Engineer (Grok 4.5) |
+| 2026-07-22 | Expanded §12 with AI-specific vulns (phantom deps, silent insecurity), human architecture audit, property-based testing targets, and secure prompt rules | Senior Engineer (Grok 4.5) |
+| 2026-07-22 | Added §12.9 product posture: OSS gateway + paid dashboard, Doppler secrets, BYOK upstream keys, hosting deferred | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -512,3 +516,137 @@ The suite is implemented end-to-end so CI works Day 1. Deepen ownership by exten
 | Vercel | Dashboard deploy health | Gateway streaming safety, AST, OWASP, fuzz, understanding |
 | Bugbot | Reviewer-style code critique | Deterministic policy + forcing *you* to understand |
 | **AI Guardrail** | Structural / security / fuzz / copyright / **comprehension quiz** | Product UX polish of the dashboard |
+
+---
+
+## 12. Open-Source Trust — AI-Assisted Code Companies Will Accept
+
+> **Problem:** Large parts of this repo were (and will continue to be) built with AI assistance (~90% boilerplate/wiring). Manual review alone is not enough for venture-backed / security-conscious adopters.
+>
+> **Answer:** Turn the repository into a **compliance machine**. Companies accept AI-assisted code when it passes the same automated vetting major tech firms require — plus explicit human accountability.
+
+### 12.1 Principle
+
+AI velocity is allowed. Opaque, unproven, or legally ambiguous code is not. Every public merge must survive performance, static analysis, tests, copyright/SBOM, security scanning, and a human comprehension gate.
+
+```text
+[AI / human PR output]
+  → Linter / formatter (Ruff)
+  → Types (Mypy)
+  → SAST (Semgrep / CodeQL)
+  → SCA + lockfiles (pip-audit / npm audit / Dependabot)
+  → Fuzz / property-based tests
+  → Copyright / SBOM / license hygiene
+  → Human architecture review + comprehension quiz (≥80%)
+  → Approved merge
+```
+
+### 12.2 Prove the code is written well
+
+| Risk (common AI failure) | Required control | Status in this repo |
+|--------------------------|------------------|---------------------|
+| Async mistakes (blocking the event loop, broken streaming generators) | `asyncio` debug mode; load/profile under concurrent traffic (e.g. Locust + Scalene / py-spy) | **Target** — add load/profile jobs before public OSS launch; Phase 1 already ships streaming contract tests |
+| Hallucinated APIs / sloppy structure | Unforgiving static analysis: Ruff + Mypy; CI blocks on any type/lint failure | **Landed** — Layers B–E (`ruff`, `mypy`); tighten toward `mypy --strict` / broader Ruff selects as Phase 1 hardens |
+| Untested edge paths | High coverage + integration tests for network drops, malformed provider payloads, scrubber edges | **Partial** — pytest + coverage floor (≥60% now); **raise toward ≥95%** before marketing OSS readiness |
+| Brittle logic under weird inputs | Fuzz chamber (Step 3) + property-based tests (e.g. Hypothesis for Python; fast-check for dashboard JS) | **Partial** — Step 3 fuzz landed; **Target** — add Hypothesis (gateway) / fast-check (dashboard) for parsers & scrubbers |
+| Opaque architecture | QRSPI + Ledger; human-owned checkpoints for core pillars | **Landed** — see §5–§6, §9 |
+
+**Coverage rule (OSS bar):** A public “enterprise-ready” claim requires a coverage badge in the mid-to-high 90s and explicit tests for streaming failure modes and (from Phase 2) PII scrub loops — not just happy paths.
+
+### 12.3 Prove companies can legally and securely adopt it
+
+Corporate legal and security teams worry about **IP leakage** and **vulnerabilities**. Map every fear to an automated gate:
+
+| Fear | Control | Status in this repo |
+|------|---------|---------------------|
+| AI pasted copyrighted snippets | Copyright filter (Step 5) + growing `known_snippets.json`; optional FOSSA/Snyk-class license scanners | **Landed** (Step 5); expand signatures + consider FOSSA/Snyk for public releases |
+| Ambiguous third-party licenses / hidden deps | SBOM on every ship path; Dependabot + pip-audit / npm audit | **Landed** — Trivy SBOM + Layer B audits |
+| OWASP / structural vulns | Semgrep + CodeQL (security-extended) on every PR | **Landed** — Layer C |
+| Secrets in git / containers | Gitleaks (checksummed); Trivy CRITICAL+HIGH on image; never commit keys | **Landed** — Layer B/E; enable GitHub secret scanning + push protection if not already on |
+| Supply-chain / IaC drift | SHA-pinned Actions; Checkov on Terraform | **Landed** — Layer E |
+
+### 12.4 Eliminate AI-specific vulnerability classes
+
+Standard reviews miss traps that models fall into repeatedly. Treat these as first-class gates:
+
+| AI-specific trap | Why it happens | Required control | Status |
+|------------------|----------------|------------------|--------|
+| **Hallucinated / typosquat deps** | Models invent package names; attackers register phantoms | Lockfiles only (`poetry.lock` / `uv.lock` / `package-lock.json`); never `pip install <name-from-chat>` without verifying PyPI; SCA (pip-audit / npm audit / Dependabot) must pass | **Partial** — SCA landed; keep lockfiles authoritative; reject PRs that add unverified deps |
+| **Silent insecurity** | AI omits validation, rate limits, and server-side authz unless forced | Review auth endpoints, FS access, and parsers with hostility; never trust client-side checks; prefer explicit allowlists (see `EgressCheckedAsyncClient`) | **Partial** — egress allowlist + OWASP/Semgrep/CodeQL; **Target** — rate limiting + authz checklist on every API PR |
+| **Secrets mirrored from context** | Models paste fake or real keys present in prompts/chat | Secret scanners pre-commit / CI (Gitleaks; optional Trufflehog / GitGuardian); `.env` never committed; rotate any key that appeared in a prompt | **Landed** (Gitleaks); optional second scanner before public OSS |
+
+**Rule:** Do not trust client-side logic generated by AI. Authorization and validation live on the server (gateway), always.
+
+### 12.5 Human architecture & code-quality audit
+
+When reviewing AI diffs, **do not review syntax** — review behavior and fit. CI already catches lint/types.
+
+| Review layer | What to look for in AI code |
+|--------------|-----------------------------|
+| Logic & state | Wrong assumptions about state transitions or provider API responses |
+| Error handling | Blank `except`, swallowed errors, missing logs/retries for transient upstream failures |
+| Architectural fit | Reinvented helpers that already exist under `app/` / `governance/` |
+| Redundant bloat | Over-verbose, over-commented, or defensively re-checking the same invariant five times |
+
+**Ownership rule:** Every line of AI-assisted code must have a **human maintainer** who owns maintenance, security, and bugs. If you cannot explain why the model chose a given abstraction, **reject the PR** (quiz ≥80% is necessary but not sufficient — architecture fit still fails the PR).
+
+### 12.6 Prompt engineering for secure generation
+
+Output quality is bounded by prompt constraints. Agents and humans must:
+
+1. **Use defensive system / task prompts** — name the library and the attack class up front  
+   Example: *“Parse user XML with `defusedxml` (XXE), enforce a 5MB max payload, return explicit error types, and include unit tests for malformed inputs.”*
+2. **Provide repo context** — point at existing patterns (`app/security/`, provider adapters, error shapes) so the model does not invent parallel utilities.
+3. **Require tests in the same change** — malformed payloads, nulls, oversized bodies, and authz-denied paths.
+4. **Forbid silent defaults** — no “TODO: add auth later,” no catch-all `except Exception: pass`, no new deps without lockfile + justification.
+
+Wire these into QRSPI Design/Plan prompts (`.cursor/qrspi/`) so every stage inherits the same security bar.
+
+### 12.7 Turn the comprehension quiz into the OSS trust pitch
+
+The Step 6 / Step 7 merge gate (≥80% quiz before Approve & Merge) is not only an internal learning tool — it is the public trust story:
+
+> We use AI to move fast. **No AI-assisted change merges** unless a human engineer passes an automated comprehension test on that PR’s logic. That is human accountability, not vibes-based review.
+
+**README / launch messaging (when going public):**
+
+1. State AI involvement honestly (~boilerplate vs human-owned pillars).
+2. Link required checks: Governance Steps 1–6, Governance Quiz, Enterprise Layers B–E, CodeQL.
+3. Show badges: coverage, SBOM/security scanning, signed commits / CODEOWNERS.
+4. Point to human checkpoint files (§9) so adopters see which core logic is human-engineered.
+
+### 12.8 Risk vs safety of this build workflow
+
+| Mode | Risk if alone | Safety mechanism |
+|------|---------------|------------------|
+| Cursor agents (Composer bulk, Grok review) | Fast but can hallucinate async/security bugs, phantom deps, missing authz | Lockfiles + SCA + SAST + tests + fuzz + human architecture review |
+| Autonomous QRSPI | Can over-implement or invent parallel patterns | File allowlists, fresh subagents, Ledger law, defensive prompts (§12.6) |
+| Human Hands-On checkpoints | Slow | Guarantees resume-defensible, accountable core logic |
+| Comprehension quiz + CODEOWNERS | Process overhead | Blocks opaque merges; forces understanding + named ownership |
+
+**Bottom line for OSS:** Do not ask companies to “trust the AI.” Ask them to trust the **gates**. If the compliance machine is stricter than their internal bar, AI authorship stops being a blocker.
+
+### 12.9 Product model — open-source gateway, paid dashboard, Doppler, BYOK
+
+This repository is intended to ship as an **open-source security gateway** with a **paid hosted dashboard** (governance / review / quiz / ops UI). The proxy stays self-hostable and auditable; the commercial surface is the managed dashboard and related cloud conveniences — not a closed-source core proxy.
+
+| Layer | License / access posture | Notes |
+|-------|--------------------------|-------|
+| Gateway (`app/`) | Open source (public repo) | Pre-flight proxy; companies can run it in their own network |
+| Governance CLI (`governance/`) | Open source | Merge gates stay visible and forkable |
+| Dashboard (`dashboard/`) | Paid / hosted product | Step 7 review panel, quiz UX, operator workflows; self-host optional later if offered |
+| Compliance machine (CI Layers B–E, CodeQL, etc.) | Open source workflows | Trust story for OSS adopters |
+
+**Secrets: Doppler (no laptop `.env` required).**  
+Operators manage secrets in **Doppler** as the source of truth and sync them into the chosen host (Fly / Render / Vercel / GitHub Actions). The gateway already reads process environment variables via `pydantic-settings` — Doppler replaces `.env` files for cloud-only workflows. Typical Doppler-held values: `GATEWAY_API_KEY`, rate-limit/log config, dashboard secrets, CI ops tokens (e.g. `FOSSA_API_KEY`). Do **not** store customer LLM keys in Doppler as the product default.
+
+**BYOK (bring your own key) for upstream LLMs.**  
+- **`GATEWAY_API_KEY`** — authenticates callers *to this proxy* (Doppler / host secrets).  
+- **OpenAI / Anthropic keys** — belong to the *end user / tenant*; sent per request (e.g. `X-Provider-Api-Key`), never committed, never treated as a shared platform key by default.  
+- Env `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` remain optional fallbacks only if we explicitly offer “platform key” mode later; strict BYOK leaves them unset.  
+- Implementation target: providers use the per-request provider key; do not log it; do not put it in JSON bodies.
+
+**Hosting — deferred.**  
+Phase 1 already ships stubs (`Dockerfile`, `fly.toml`, `render.yaml`). **Final hosting choice is TBD** (Fly vs Render vs later AWS ECS/private VPC in Phase 4). Do not hard-block product work on picking a host; keep the gateway portable (Docker + env vars + Doppler sync). Revisit when traffic, streaming limits, and dashboard coupling are clearer.
+
+**Operator checklist cross-link:** human click-paths for secrets/CI remain in [`SECURITY_OPERATOR_CHECKLIST.md`](SECURITY_OPERATOR_CHECKLIST.md) once merged from the hardening line; until then, treat Doppler + BYOK above as Ledger law for secret design.
