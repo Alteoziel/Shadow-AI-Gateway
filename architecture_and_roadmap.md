@@ -10,7 +10,7 @@
 > - If a Human Hands-On checkpoint is open, agents **must not** fill it.
 > - Read this file **before** any developmental cycle. Keep phase/checkpoint status current.
 
-**Last updated:** 2026-07-20  
+**Last updated:** 2026-07-22  
 **Current phase:** Phase 1 — Crawl (Asynchronous Proxy Setup)  
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
 **Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (required check on `main`)
@@ -429,6 +429,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | 2026-07-20 | Hardened Layers B–E: SHA-pinned Actions, checksummed Gitleaks, Semgrep packs hard-fail, Trivy CRITICAL+HIGH + SBOM, CodeQL upload, `EgressCheckedAsyncClient`, non-root image, coverage ≥60% | Senior Engineer (Grok 4.5) |
 | 2026-07-20 | Operator: Dependabot + Code scanning enabled; Protect Main tightened (strict checks, last-push approval, signed commits); CodeQL `upload: true` | Human + Senior Engineer |
 | 2026-07-20 | Advanced Code scanning: tuned `codeql.yml` (`security-extended`, `CodeQL (Layer C)` check name, SARIF upload); removed duplicate CodeQL job from hygiene workflow | Senior Engineer (Grok 4.5) |
+| 2026-07-22 | Added §12 Open-Source Trust — enterprise adoption playbook for AI-assisted code | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -512,3 +513,71 @@ The suite is implemented end-to-end so CI works Day 1. Deepen ownership by exten
 | Vercel | Dashboard deploy health | Gateway streaming safety, AST, OWASP, fuzz, understanding |
 | Bugbot | Reviewer-style code critique | Deterministic policy + forcing *you* to understand |
 | **AI Guardrail** | Structural / security / fuzz / copyright / **comprehension quiz** | Product UX polish of the dashboard |
+
+---
+
+## 12. Open-Source Trust — AI-Assisted Code Companies Will Accept
+
+> **Problem:** Large parts of this repo were (and will continue to be) built with AI assistance (~90% boilerplate/wiring). Manual review alone is not enough for venture-backed / security-conscious adopters.
+>
+> **Answer:** Turn the repository into a **compliance machine**. Companies accept AI-assisted code when it passes the same automated vetting major tech firms require — plus explicit human accountability.
+
+### 12.1 Principle
+
+AI velocity is allowed. Opaque, unproven, or legally ambiguous code is not. Every public merge must survive performance, static analysis, tests, copyright/SBOM, security scanning, and a human comprehension gate.
+
+```text
+[PR code]
+  → Semgrep / CodeQL (vulns)
+  → Trivy / supply-chain (deps + image)
+  → Copyright / SBOM / license hygiene
+  → Human comprehension quiz (≥80%)
+  → Approved merge
+```
+
+### 12.2 Prove the code is written well
+
+| Risk (common AI failure) | Required control | Status in this repo |
+|--------------------------|------------------|---------------------|
+| Async mistakes (blocking the event loop, broken streaming generators) | `asyncio` debug mode; load/profile under concurrent traffic (e.g. Locust + Scalene / py-spy) | **Target** — add load/profile jobs before public OSS launch; Phase 1 already ships streaming contract tests |
+| Hallucinated APIs / sloppy structure | Unforgiving static analysis: Ruff + Mypy; CI blocks on any type/lint failure | **Landed** — Layers B–E (`ruff`, `mypy`); tighten toward `mypy --strict` / broader Ruff selects as Phase 1 hardens |
+| Untested edge paths | High coverage + integration tests for network drops, malformed provider payloads, scrubber edges | **Partial** — pytest + coverage floor (≥60% now); **raise toward ≥95%** before marketing OSS readiness |
+| Opaque architecture | QRSPI + Ledger; human-owned checkpoints for core pillars | **Landed** — see §5–§6, §9 |
+
+**Coverage rule (OSS bar):** A public “enterprise-ready” claim requires a coverage badge in the mid-to-high 90s and explicit tests for streaming failure modes and (from Phase 2) PII scrub loops — not just happy paths.
+
+### 12.3 Prove companies can legally and securely adopt it
+
+Corporate legal and security teams worry about **IP leakage** and **vulnerabilities**. Map every fear to an automated gate:
+
+| Fear | Control | Status in this repo |
+|------|---------|---------------------|
+| AI pasted copyrighted snippets | Copyright filter (Step 5) + growing `known_snippets.json`; optional FOSSA/Snyk-class license scanners | **Landed** (Step 5); expand signatures + consider FOSSA/Snyk for public releases |
+| Ambiguous third-party licenses / hidden deps | SBOM on every ship path; Dependabot + pip-audit / npm audit | **Landed** — Trivy SBOM + Layer B audits |
+| OWASP / structural vulns | Semgrep + CodeQL (security-extended) on every PR | **Landed** — Layer C |
+| Secrets in git / containers | Gitleaks (checksummed); Trivy CRITICAL+HIGH on image; never commit keys | **Landed** — Layer B/E; enable GitHub secret scanning + push protection if not already on |
+| Supply-chain / IaC drift | SHA-pinned Actions; Checkov on Terraform | **Landed** — Layer E |
+
+### 12.4 Turn the comprehension quiz into the OSS trust pitch
+
+The Step 6 / Step 7 merge gate (≥80% quiz before Approve & Merge) is not only an internal learning tool — it is the public trust story:
+
+> We use AI to move fast. **No AI-assisted change merges** unless a human engineer passes an automated comprehension test on that PR’s logic. That is human accountability, not vibes-based review.
+
+**README / launch messaging (when going public):**
+
+1. State AI involvement honestly (~boilerplate vs human-owned pillars).
+2. Link required checks: Governance Steps 1–6, Governance Quiz, Enterprise Layers B–E, CodeQL.
+3. Show badges: coverage, SBOM/security scanning, signed commits / CODEOWNERS.
+4. Point to human checkpoint files (§9) so adopters see which core logic is human-engineered.
+
+### 12.5 Risk vs safety of this build workflow
+
+| Mode | Risk if alone | Safety mechanism |
+|------|---------------|------------------|
+| Cursor agents (Composer bulk, Grok review) | Fast but can hallucinate async/security bugs | Static analysis + tests + fuzz + CodeQL/Semgrep |
+| Autonomous QRSPI | Can over-implement | File allowlists, fresh subagents, Ledger law |
+| Human Hands-On checkpoints | Slow | Guarantees resume-defensible, accountable core logic |
+| Comprehension quiz + CODEOWNERS | Process overhead | Blocks opaque merges; forces understanding |
+
+**Bottom line for OSS:** Do not ask companies to “trust the AI.” Ask them to trust the **gates**. If the compliance machine is stricter than their internal bar, AI authorship stops being a blocker.
