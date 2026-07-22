@@ -46,11 +46,12 @@ Require status checks on `main`: **`Governance Steps 1–6`**, **`Enterprise Lay
 
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env — set OPENAI/ANTHROPIC keys AND a long random GATEWAY_API_KEY
 
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+# Or (preferred, frozen): curl -LsSf https://astral.sh/uv/install.sh | sh && uv sync --frozen --extra dev
 ```
 
 ### Run
@@ -65,10 +66,11 @@ Health check:
 curl http://localhost:8000/health
 ```
 
-Chat completion (returns `501` until Checkpoint #1 is filled):
+Chat completion (requires gateway API key):
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}'
 ```
