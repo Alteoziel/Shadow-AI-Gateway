@@ -66,4 +66,5 @@ jobs:
       - name: Run asyncio-debug smoke tests
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          uv run python -m pytest tests/test_health.py tests/test_security_layer.py -q
+          # Subset smoke run — disable coverage floor (enforced by full Gateway pytest).
+          uv run python -m pytest tests/test_health.py tests/test_security_layer.py -q --no-cov

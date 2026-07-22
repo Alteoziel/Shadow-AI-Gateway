@@ -29,8 +29,17 @@ def _configured_keys(settings: Settings) -> frozenset[str]:
 
 
 def key_fingerprint(token: str) -> str:
-    """Non-reversible short id for audit / rate-limit buckets."""
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+    """Non-reversible short id for audit / rate-limit buckets.
+
+    HMAC (not bare SHA-256) so this is keyed fingerprinting for telemetry
+    buckets, not password storage / verification.
+    """
+    digest = hmac.new(
+        b"shadow-ai-gateway-key-fingerprint-v1",
+        token.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return digest[:16]
 
 
 def _constant_time_match(provided: str, allowed: frozenset[str]) -> bool:

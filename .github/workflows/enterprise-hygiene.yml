@@ -77,9 +77,11 @@ jobs:
       - name: "B · pip-audit (governance)"
         working-directory: governance
         run: |
-          python -m pip install -U "pip>=25.3"
+          # Governance [dev] does not ship pip-audit; gateway install uses uv so
+          # pip-audit is not on PATH here. Install it explicitly for this step.
+          python -m pip install -U "pip>=25.3" pip-audit
           pip install -e ".[dev]"
-          pip-audit --progress-spinner off
+          python -m pip_audit --progress-spinner off
 
       - name: "B · npm audit (dashboard)"
         working-directory: dashboard
