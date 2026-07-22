@@ -11,7 +11,7 @@ This list is for a **non-expert human operator**. Code and CI can automate a lot
 
 | Item | Status | Where / what you do |
 |------|--------|---------------------|
-| Python lockfile (`uv.lock`) + frozen CI | **DONE IN REPO** | Confirm with §9 below; after changing deps run `uv lock` |
+| Python lockfile (`uv.lock`) + frozen CI | **DONE IN REPO** | No PC needed — see §9; agents update `uv.lock` when deps change |
 | Gateway authz (API key) | **DONE IN REPO** | **YOU** must set `GATEWAY_API_KEY` in `.env` / hosting secrets (§4) |
 | Rate limiting | **DONE IN REPO** | Tune `GATEWAY_RATE_LIMIT_PER_MINUTE` if needed |
 | Coverage floor (98% now; ~99% measured) | **DONE IN REPO** | Maintain ≥98%; see §8 |
@@ -214,22 +214,30 @@ Coverage floor = “CI fails if too little of `app/` is tested.” Do not lower 
 
 ---
 
-## 9. How to confirm the uv lockfile workflow works
+## 9. How the uv lockfile works (cloud-only — no PC needed)
 
-**DONE IN REPO** when `uv.lock` (and uv-based install docs/CI) are present.  
-**YOU MUST DO THIS:** run the frozen install once on your machine to confirm it works.
+**DONE IN REPO:** `uv.lock` is already in git. CI installs with `uv sync --frozen`.
 
-`uv` is a fast Python package installer. `--frozen` means “install exactly what the lockfile says — do not quietly change versions.”
+### What it is (plain English)
 
-1. Install [uv](https://github.com/astral-sh/uv) if needed (`curl -LsSf https://astral.sh/uv/install.sh | sh` or your OS package manager).
-2. From the repo root (with `uv.lock` present):
-   ```bash
-   uv sync --frozen
-   ```
-3. Success = it finishes without resolving/changing the lockfile and without error.
-4. If it fails, fix the lockfile/environment in a PR — do not bypass by deleting the lockfile.
+- `pyproject.toml` = “we need FastAPI and friends” (version *ranges*).
+- `uv.lock` = “exact versions that were tested” (pinned list).
+- Frozen CI = GitHub installs **only** those exact versions, so AI/humans can’t silently pull a different package tomorrow.
 
-- [ ] `uv sync --frozen` succeeds locally
+### What you do (since you don’t run tools on a PC)
+
+**Day to day: nothing.** Merging PRs is enough. CI proves the lockfile works.
+
+**Only when Python dependencies change** (someone edits `pyproject.toml` dependencies):
+
+1. Ask the cloud agent (or whoever edits deps) to run `uv lock` in the workspace.
+2. Ensure the PR **includes the updated `uv.lock`** in the same commit/PR as the `pyproject.toml` change.
+3. On the PR, confirm **Gateway pytest** / **Enterprise Layers B–E** are green (they use `uv sync --frozen`).
+
+Do **not** delete `uv.lock`. Do **not** bypass frozen installs to “make CI green.”
+
+- [x] `uv.lock` present in repo
+- [ ] (Only when deps change) PR updates `uv.lock` + CI stays green
 
 ---
 
