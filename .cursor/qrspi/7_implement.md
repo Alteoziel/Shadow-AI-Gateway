@@ -63,6 +63,17 @@ If you're starting fresh in a new context window:
 - Use sub-agents sparingly — only for targeted debugging or exploring unfamiliar code.
 - Commit after each phase passes automated verification — one commit per phase.
 
+## Secure generation constraints
+
+Mandatory when implementing parsing, auth, networking, `/v1` routes, or secrets:
+
+- **Defensive prompts:** Name concrete libraries and attack classes (e.g. `defusedxml` / XXE, max payload size, SSRF egress allowlists). Do not hand-wave “sanitize input.”
+- **Reuse repo patterns:** Prefer existing `app/security/` helpers and provider adapters. Do not invent parallel utilities.
+- **Tests in the same change:** Ship malformed, null, oversized, and authz-denied tests with the feature — not a follow-up PR.
+- **No silent defaults:** Forbid “TODO add auth later,” bare `except Exception: pass`, and new dependencies without lockfile update + justification.
+- **New `/v1` routes:** Authz, rate-limiting, and audit logging must be implemented or explicitly deferred with rationale — never silent.
+- **Secrets & trust:** Never hardcode secrets. Never trust client-side checks as authorization.
+
 ## When to Go Back
 
 If a phase reveals the plan is fundamentally wrong — not a small mismatch but a structural issue like a missing dependency, wrong API, or incorrect assumption about the codebase — tell the user. For small mismatches, adapt and continue. For fundamental issues, suggest re-running `/qrspi/5_plan` or even `/qrspi/3_design` with the new information rather than building on a broken foundation.

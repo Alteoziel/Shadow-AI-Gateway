@@ -89,6 +89,17 @@ Read `$ARGUMENTS/structure.md`, `$ARGUMENTS/design.md`, and `$ARGUMENTS/research
 - If the plan includes schema migrations, include updating any test assertions that reference the current schema version.
 - If the plan includes codegen steps, note what to do if codegen fails or is unavailable (e.g., manually adding fields to generated files as a fallback).
 
+## Secure generation constraints
+
+Mandatory for any plan that touches parsing, auth, networking, `/v1` routes, or secrets:
+
+- **Defensive prompts:** Name concrete libraries and attack classes (e.g. `defusedxml` / XXE, max payload size, SSRF egress allowlists). Do not hand-wave “sanitize input.”
+- **Reuse repo patterns:** Prefer existing `app/security/` helpers and provider adapters. Do not invent parallel utilities.
+- **Tests in the same change:** Include test steps for malformed, null, oversized, and authz-denied cases in the same phase as the feature.
+- **No silent defaults:** Forbid “TODO add auth later,” bare `except Exception: pass`, and new dependencies without lockfile update + justification.
+- **New `/v1` routes:** Authz, rate-limiting, and audit logging must appear as explicit plan steps (or an explicit deferral with rationale — never silent).
+- **Secrets & trust:** Never hardcode secrets. Never trust client-side checks as authorization.
+
 ## When to Go Back
 
 If expanding the structure reveals that a phase can't be implemented as outlined — missing information, incorrect assumptions, or a structural issue — tell the user and suggest re-running `/qrspi/4_structure` or `/qrspi/3_design` rather than writing a plan you know is flawed.
