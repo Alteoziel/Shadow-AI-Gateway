@@ -33,5 +33,40 @@
     "id": "raw_sse_bytes_without_cleanup",
     "description": "Streaming relay anti-pattern that forwards raw upstream bytes without closing the response/client",
     "content": "from fastapi.responses import StreamingResponse\n\nasync def relay(upstream):\n    async def chunks():\n        async for chunk in upstream.aiter_bytes():\n            yield chunk\n    return StreamingResponse(chunks(), media_type=\"text/event-stream\")\n"
+  },
+  {
+    "id": "eval_exec_on_request_body",
+    "description": "Forbidden dynamic code execution on untrusted gateway request payload",
+    "content": "payload = await request.json()\nresult = eval(payload.get(\"expression\", \"0\"))\nexec(payload.get(\"hook\", \"pass\"), globals())\n"
+  },
+  {
+    "id": "disabled_ssl_verify_httpx",
+    "description": "Upstream provider call with TLS certificate verification disabled",
+    "content": "async with httpx.AsyncClient(verify=False) as client:\n    return await client.post(settings.openai_base_url + \"/v1/chat/completions\", json=body)\n"
+  },
+  {
+    "id": "write_secrets_to_disk",
+    "description": "Persisting API keys or tokens to a world-readable local file",
+    "content": "Path(\"/tmp/gateway_secrets.txt\").write_text(\n    f\"OPENAI={settings.openai_api_key}\\nGATEWAY={settings.gateway_api_key}\\n\"\n)\n"
+  },
+  {
+    "id": "unrestricted_cors_star",
+    "description": "Starlette/FastAPI CORS middleware allowing any origin with credentials",
+    "content": "app.add_middleware(\n    CORSMiddleware,\n    allow_origins=[\"*\"],\n    allow_credentials=True,\n    allow_methods=[\"*\"],\n    allow_headers=[\"*\"],\n)\n"
+  },
+  {
+    "id": "sql_string_concat_user_input",
+    "description": "SQL built by concatenating untrusted client fields (injection risk)",
+    "content": "query = \"SELECT * FROM audit_events WHERE tenant_id = '\" + tenant_id + \"' AND route = '\" + route + \"'\"\ncursor.execute(query)\n"
+  },
+  {
+    "id": "log_full_authorization_header",
+    "description": "Logging the complete Authorization header (exposes bearer tokens)",
+    "content": "logger.info(\"inbound auth header=%s\", request.headers.get(\"Authorization\"))\nlogger.debug(\"proxying with Authorization: %s\", authorization)\n"
+  },
+  {
+    "id": "pickle_loads_network_input",
+    "description": "Deserializing untrusted network bytes with pickle (RCE class)",
+    "content": "raw = await request.body()\nobj = pickle.loads(raw)\nreturn await handle_gateway_job(obj)\n"
   }
 ]

@@ -1,0 +1,24 @@
+name: FOSSA License Scan
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fossa:
+    name: FOSSA License Scan
+    # Skip gracefully when FOSSA_API_KEY is not configured (forks / unset secret).
+    if: ${{ secrets.FOSSA_API_KEY != '' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: FOSSA analyze
+        uses: fossas/fossa-action@29693cc50323968e039056be419b32989fc5880c # v2.0.0
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}

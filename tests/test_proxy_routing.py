@@ -5,6 +5,7 @@ from app.main import app
 from app.proxy.correlation import CORRELATION_ID_HEADER
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from tests.conftest import AUTH_HEADERS
 
 client = TestClient(app)
 
@@ -34,7 +35,11 @@ def test_chat_forwards_with_real_interceptor_and_mocked_provider():
         "app.api.v1.chat.OpenAIProvider",
         return_value=mock_provider,
     ):
-        response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
+        response = client.post(
+            "/v1/chat/completions",
+            json=CHAT_PAYLOAD,
+            headers=AUTH_HEADERS,
+        )
 
     assert response.status_code == 200
     assert response.headers[CORRELATION_ID_HEADER].startswith("corr_")
@@ -83,7 +88,11 @@ async def test_chat_forwards_to_provider_after_interceptor_implemented():
             return_value=mock_provider,
         ),
     ):
-        response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
+        response = client.post(
+            "/v1/chat/completions",
+            json=CHAT_PAYLOAD,
+            headers=AUTH_HEADERS,
+        )
 
     assert response.status_code == 200
     assert response.headers[CORRELATION_ID_HEADER].startswith("corr_")
@@ -124,7 +133,11 @@ async def test_chat_returns_provider_gateway_errors_after_interceptor_implemente
             return_value=mock_provider,
         ),
     ):
-        response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
+        response = client.post(
+            "/v1/chat/completions",
+            json=CHAT_PAYLOAD,
+            headers=AUTH_HEADERS,
+        )
 
     assert response.status_code == 502
     assert response.json()["detail"]["error"] == "upstream_http_error"

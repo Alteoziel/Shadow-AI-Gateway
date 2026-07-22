@@ -39,10 +39,13 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
-      - name: Install gateway (dev)
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/0.11.31/install.sh | sh
+
+      - name: Install gateway (dev, frozen lockfile)
         run: |
-          python -m pip install -U "pip>=25.3"
-          pip install -e ".[dev]"
+          export PATH="$HOME/.local/bin:$PATH"
+          uv sync --frozen --extra dev
 
       # ── Layer B: secrets + dependency audit ─────────────────────────
       # Checksum-verified binary (no org Gitleaks Action license required).
@@ -67,7 +70,9 @@ jobs:
             --exit-code 1
 
       - name: "B · pip-audit (gateway)"
-        run: pip-audit --progress-spinner off
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run pip-audit --progress-spinner off
 
       - name: "B · pip-audit (governance)"
         working-directory: governance
@@ -84,10 +89,14 @@ jobs:
 
       # ── Layer C: lint, types, SAST ──────────────────────────────────
       - name: "C · Ruff"
-        run: ruff check app tests
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run ruff check app tests
 
       - name: "C · Mypy"
-        run: mypy app
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run mypy app
 
       - name: "C · Semgrep"
         run: |
@@ -112,7 +121,11 @@ jobs:
 
       # ── Layer D: product tests + coverage ───────────────────────────
       - name: "D · Pytest + coverage floor"
-        run: pytest -q
+        env:
+          GATEWAY_API_KEY: test-gateway-key
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run pytest -q
 
       # ── Layer E: container + IaC ────────────────────────────────────
       - name: "E · Build gateway image"

@@ -73,3 +73,51 @@ rules:
       include:
         - "**/app/proxy/**"
         - "**/app/api/**"
+
+  # Expects final authz wiring: Depends(require_gateway_auth) (or name in signature).
+  # Regex (not AST) — FastAPI Annotated/Depends forms vary; nested parens break [^)]*.
+  - id: shadow-ai.chat-route-requires-gateway-auth
+    languages: [python]
+    severity: ERROR
+    message: |
+      /chat/completions handlers must reference require_gateway_auth in the
+      function signature (e.g. Depends(require_gateway_auth)).
+    patterns:
+      - pattern-regex: async def chat_completions\s*\(
+      - pattern-not-regex: (?s)async def chat_completions\([\s\S]*?require_gateway_auth[\s\S]*?\)(?:\s*->[\s\S]*?)?:\s*\n
+    paths:
+      include:
+        - "**/app/api/**"
+
+  - id: shadow-ai.no-bare-except-pass
+    languages: [python]
+    severity: ERROR
+    message: Bare except/Exception handlers that only pass are forbidden under app/.
+    patterns:
+      - pattern-either:
+          - pattern: |
+              except:
+                  pass
+          - pattern: |
+              except Exception:
+                  pass
+          - pattern: |
+              except Exception as $E:
+                  pass
+    paths:
+      include:
+        - "**/app/**"
+
+  # Expects final rate-limit dependency name: enforce_rate_limit.
+  - id: shadow-ai.rate-limit-dependency-expected
+    languages: [python]
+    severity: WARNING
+    message: |
+      chat_completions should include enforce_rate_limit in its signature
+      (e.g. Depends(enforce_rate_limit)).
+    patterns:
+      - pattern-regex: async def chat_completions\s*\(
+      - pattern-not-regex: (?s)async def chat_completions\([\s\S]*?enforce_rate_limit[\s\S]*?\)(?:\s*->[\s\S]*?)?:\s*\n
+    paths:
+      include:
+        - "**/app/api/**"

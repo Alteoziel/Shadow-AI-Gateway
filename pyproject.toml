@@ -21,6 +21,8 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "pip-audit>=2.7.0",
+    "hypothesis>=6.122.0",
+    "locust>=2.32.0",
 ]
 
 [build-system]
@@ -37,15 +39,11 @@ testpaths = ["tests"]
 addopts = [
     "--cov=app",
     "--cov-report=term-missing",
-    "--cov-fail-under=60",
+    "--cov-fail-under=85",
 ]
 
 [tool.coverage.run]
 branch = true
-# interceptor.py is Checkpoint #1 (NotImplementedError); keep omitted until implemented.
-omit = [
-    "app/proxy/interceptor.py",
-]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -78,8 +76,10 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.12"
-strict = false
+strict = true
 warn_return_any = true
 warn_unused_ignores = true
 ignore_missing_imports = true
 files = ["app"]
+disallow_untyped_defs = true
+check_untyped_defs = true

@@ -1,7 +1,7 @@
 import logging
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import get_settings
@@ -11,6 +11,9 @@ from app.proxy.providers.anthropic import AnthropicProvider
 from app.proxy.providers.base import BaseLLMProvider
 from app.proxy.providers.openai import OpenAIProvider
 from app.proxy.streaming import relay_sse_stream
+from app.security.audit import AuditEventType, emit_audit
+from app.security.auth import require_gateway_auth
+from app.security.rate_limit import enforce_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +52,6 @@ def _build_upstream_payload(
     protected = {"model", "messages", "stream"}
     payload: dict[str, Any] = {}
 
-    # Additive extras first (cannot win over protected fields later)
     if request.extra_body:
         for key, value in request.extra_body.items():
             if key not in protected:
@@ -64,12 +66,10 @@ def _build_upstream_payload(
     if request.stop is not None:
         payload["stop"] = request.stop
 
-    # Non-protected normalized metadata
     for key, value in normalized.items():
         if key not in protected:
             payload[key] = value
 
-    # Protected fields last — interceptor + request contract enforce these
     payload["model"] = normalized.get("model", request.model)
     payload["messages"] = normalized.get(
         "messages", [m.model_dump() for m in request.messages]
@@ -82,10 +82,26 @@ def _build_upstream_payload(
 async def chat_completions(
     request_body: ChatCompletionRequest,
     request: Request,
+    _auth_key: Annotated[str, Depends(require_gateway_auth)],
+    _rate_key: Annotated[str, Depends(enforce_rate_limit)],
 ) -> JSONResponse | StreamingResponse:
     raw_body = request_body.model_dump(exclude_none=True)
     headers = {key: value for key, value in request.headers.items()}
-    correlation_id = getattr(request.state, "correlation_id", None)
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    key_id = getattr(request.state, "gateway_key_id", _auth_key)
+
+    await emit_audit(
+        AuditEventType.REQUEST_RECEIVED,
+        correlation_id=correlation_id,
+        user_id=key_id,
+        model=request_body.model,
+        metadata={"path": str(request.url.path), "stream": request_body.stream},
+    )
+    await emit_audit(
+        AuditEventType.AUTH_OK,
+        correlation_id=correlation_id,
+        user_id=key_id,
+    )
 
     try:
         logger.info(
@@ -104,24 +120,73 @@ async def chat_completions(
             correlation_id,
             exc,
         )
+        await emit_audit(
+            AuditEventType.INTERCEPTOR_BLOCK,
+            correlation_id=correlation_id,
+            user_id=key_id,
+            blocked=True,
+            reason="interceptor_not_implemented",
+        )
         raise HTTPException(status_code=501, detail=CHECKPOINT_501_DETAIL) from exc
+    except HTTPException as exc:
+        await emit_audit(
+            AuditEventType.INTERCEPTOR_BLOCK,
+            correlation_id=correlation_id,
+            user_id=key_id,
+            blocked=True,
+            reason=str(exc.detail),
+            metadata={"status_code": exc.status_code},
+        )
+        raise
+
+    await emit_audit(
+        AuditEventType.INTERCEPTOR_OK,
+        correlation_id=correlation_id,
+        user_id=key_id,
+        model=str(normalized.get("model", request_body.model)),
+    )
 
     provider_name = _resolve_provider(request_body)
     provider = _get_provider_adapter(provider_name)
     payload = _build_upstream_payload(request_body, normalized)
 
+    await emit_audit(
+        AuditEventType.PROVIDER_CALL,
+        correlation_id=correlation_id,
+        user_id=key_id,
+        provider=provider_name,
+        model=str(payload.get("model")),
+        metadata={"stream": request_body.stream},
+    )
+
     if request_body.stream:
-        # Hand off aclose to the stream consumer. If setup fails before that,
-        # close here so the httpx client does not leak.
         try:
             upstream = await provider.chat_completion_stream(payload)
-        except Exception:
+        except Exception as exc:
             await provider.aclose()
+            await emit_audit(
+                AuditEventType.PROVIDER_ERROR,
+                correlation_id=correlation_id,
+                user_id=key_id,
+                provider=provider_name,
+                blocked=True,
+                reason=type(exc).__name__,
+            )
             raise
         return await relay_sse_stream(upstream, on_complete=provider.aclose)
 
     try:
         result = await provider.chat_completion(payload)
         return JSONResponse(content=result)
+    except Exception as exc:
+        await emit_audit(
+            AuditEventType.PROVIDER_ERROR,
+            correlation_id=correlation_id,
+            user_id=key_id,
+            provider=provider_name,
+            blocked=True,
+            reason=type(exc).__name__,
+        )
+        raise
     finally:
         await provider.aclose()

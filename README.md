@@ -4,6 +4,7 @@ Enterprise security proxy that sits between corporate users and public LLMs (Ope
 
 > **Read first:** [`architecture_and_roadmap.md`](architecture_and_roadmap.md) — **The Ledger** — phases, checkpoints, guardrails.
 > **Task process:** [`.cursor/qrspi/`](.cursor/qrspi/) — mandatory QRSPI (see `AUTONOMOUS_MODE.md` + `CONTEXT_ISOLATION.md`).
+> **Security hardening:** human-only steps (secrets, Protect Main, FOSSA/Snyk, deploy keys) → [`SECURITY_OPERATOR_CHECKLIST.md`](SECURITY_OPERATOR_CHECKLIST.md).
 
 ## Pre-merge gate (AI Governance Engine)
 
@@ -106,8 +107,13 @@ pytest
 | `GATEWAY_HOST` | Bind host | `0.0.0.0` |
 | `GATEWAY_PORT` | Bind port | `8000` |
 | `LOG_LEVEL` | Logging level | `INFO` |
+| `GATEWAY_API_KEY` | Bearer / X-API-Key required for `/v1/*` | — (required) |
+| `GATEWAY_API_KEYS` | Optional comma-separated extra keys | — |
+| `GATEWAY_RATE_LIMIT_PER_MINUTE` | Per-key sliding window limit (`0` disables) | `60` |
 
 See `.env.example` for a copy-paste template.
+
+**Security hardening:** full operator click-path checklist → [`SECURITY_OPERATOR_CHECKLIST.md`](SECURITY_OPERATOR_CHECKLIST.md).
 
 ## Project layout
 
