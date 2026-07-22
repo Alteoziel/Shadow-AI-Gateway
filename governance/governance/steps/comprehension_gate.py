@@ -2073,7 +2073,14 @@ def _llm_enrich(pack: dict[str, Any], diff_text: str) -> dict[str, Any]:
     if not api_key or not diff_text.strip():
         return pack
 
-    base_url = os.getenv("GOVERNANCE_LLM_BASE_URL", "https://api.openai.com/v1")
+    from governance.egress import EgressDeniedError, assert_allowed_llm_base_url
+
+    try:
+        base_url = assert_allowed_llm_base_url(
+            os.getenv("GOVERNANCE_LLM_BASE_URL", "https://api.openai.com/v1")
+        )
+    except EgressDeniedError:
+        return pack
     model = os.getenv("GOVERNANCE_LLM_MODEL", "gpt-4o-mini")
     system = """You help an absolute beginner engineer understand THIS PR before merging.
 Return JSON only:

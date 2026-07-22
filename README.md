@@ -111,7 +111,8 @@ pytest
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `GATEWAY_API_KEY` | Bearer / X-API-Key required for `/v1/*` | — (required) |
 | `GATEWAY_API_KEYS` | Optional comma-separated extra keys | — |
-| `GATEWAY_RATE_LIMIT_PER_MINUTE` | Per-key sliding window limit (`0` disables) | `60` |
+| `GATEWAY_RATE_LIMIT_PER_MINUTE` | Per-key sliding window limit (≤0 falls back to 60) | `60` |
+| `GATEWAY_RATE_LIMIT_DISABLED` | Set `true` to disable rate limiting | unset |
 
 See `.env.example` for a copy-paste template.
 

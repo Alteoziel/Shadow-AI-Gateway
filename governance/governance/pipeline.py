@@ -24,8 +24,17 @@ def collect_paths(
     base_ref: str = "origin/main",
 ) -> list[Path]:
     """Resolve which files the suite should inspect."""
+    root_resolved = root.resolve()
     if files:
-        return [root / f if not Path(f).is_absolute() else Path(f) for f in files]
+        resolved: list[Path] = []
+        for f in files:
+            candidate = Path(f)
+            path = candidate if candidate.is_absolute() else root / candidate
+            path = path.resolve()
+            if not path.is_relative_to(root_resolved):
+                raise ValueError(f"Path escapes repository root: {f}")
+            resolved.append(path)
+        return resolved
 
     if changed_only:
         try:

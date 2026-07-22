@@ -13,6 +13,8 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import Settings, get_settings
+from app.proxy.correlation import parse_correlation_id
+from app.security.audit import AuditEventType, emit_audit
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -40,7 +42,19 @@ def key_fingerprint(token: str) -> str:
 
 
 def _constant_time_match(provided: str, allowed: frozenset[str]) -> bool:
-    return any(hmac.compare_digest(provided, key) for key in allowed)
+    """Compare against every configured key (no early-exit on match)."""
+    matched = False
+    for key in allowed:
+        if hmac.compare_digest(provided, key):
+            matched = True
+    return matched
+
+
+def _correlation_id(request: Request) -> str:
+    existing = getattr(request.state, "correlation_id", None)
+    if isinstance(existing, str) and existing:
+        return existing
+    return parse_correlation_id(request.headers)
 
 
 async def require_gateway_auth(
@@ -52,6 +66,9 @@ async def require_gateway_auth(
     ] = None,
 ) -> str:
     """Require a valid gateway API key. Returns a fingerprint for auditing."""
+    correlation_id = _correlation_id(request)
+    request.state.correlation_id = correlation_id
+
     allowed = _configured_keys(settings)
     if not allowed:
         raise HTTPException(
@@ -71,6 +88,13 @@ async def require_gateway_auth(
             token = header_key.strip()
 
     if not token or not _constant_time_match(token, allowed):
+        await emit_audit(
+            AuditEventType.AUTH_DENIED,
+            correlation_id=correlation_id,
+            blocked=True,
+            reason="invalid_or_missing_gateway_api_key",
+            metadata={"path": request.url.path},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing gateway API key",

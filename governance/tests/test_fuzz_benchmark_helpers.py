@@ -14,6 +14,7 @@ def test_fuzz_chamber_targets_real_gateway_helper() -> None:
     assert result.passed
     assert result.metrics["functions_tested"] >= 1
     assert result.metrics["crashes"] == 0
+    assert result.metrics["mode"] == "static"
     assert any("to_anthropic_payload" in t for t in result.metrics["targets"])
 
 
@@ -23,6 +24,17 @@ def test_fuzz_chamber_skips_human_checkpoint_interceptor() -> None:
     assert result.passed
     assert result.metrics["functions_tested"] == 0
     assert result.metrics["targets"] == []
+
+
+def test_fuzz_chamber_static_flags_eval(tmp_path: Path) -> None:
+    target = tmp_path / "evil.py"
+    target.write_text(
+        "def handle(x):\n    return eval(x)\n",
+        encoding="utf-8",
+    )
+    result = fuzz_chamber.run([target])
+    assert not result.passed
+    assert any(f.rule_id == "FUZZ002_DYNAMIC_EXEC" for f in result.findings)
 
 
 def test_benchmark_engine_profiles_injected_targets() -> None:

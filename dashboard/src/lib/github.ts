@@ -49,7 +49,7 @@ function githubToken(): string | null {
 
 /**
  * Build a GitHub merge URL from validated components.
- * Prefer GITHUB_REPOSITORY (trusted env) when set; otherwise use the parsed repo.
+ * GITHUB_REPOSITORY is required in production/Vercel; otherwise use the parsed repo.
  */
 export function buildPullMergeUrl(
   repo: string | null | undefined,
@@ -61,6 +61,14 @@ export function buildPullMergeUrl(
   }
 
   const allowed = process.env.GITHUB_REPOSITORY?.trim();
+  const prodLike =
+    process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+  if (prodLike && !allowed) {
+    return {
+      error:
+        "GITHUB_REPOSITORY must be set in production to pin merge targets.",
+    };
+  }
   if (allowed) {
     const allowedParsed = parseGithubRepo(allowed);
     if (!allowedParsed || allowedParsed.full !== parsed.full) {
@@ -108,6 +116,15 @@ export async function setGovernanceQuizStatus(input: {
   }
 
   const allowed = process.env.GITHUB_REPOSITORY?.trim();
+  const prodLike =
+    process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+  if (prodLike && !allowed) {
+    return {
+      ok: false,
+      error:
+        "GITHUB_REPOSITORY must be set in production to pin status targets.",
+    };
+  }
   if (allowed) {
     const allowedParsed = parseGithubRepo(allowed);
     if (!allowedParsed || allowedParsed.full !== parsed.full) {

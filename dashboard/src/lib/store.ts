@@ -117,6 +117,10 @@ export type StoreStatus = {
 };
 
 const REDIS_KEY = "governance:reviews";
+/** Cap retained reviews to bound memory / Redis payload size. */
+const MAX_STORED_REVIEWS = 200;
+/** Minimum quiz pass threshold — ingest cannot lower this. */
+export const MIN_PASS_THRESHOLD = 0.8;
 
 /** Process-local fallback when Redis is not configured (dev / single instance). */
 let memoryReviews: Review[] = [];
@@ -211,17 +215,31 @@ export function comprehensionFingerprint(
   return createHash("sha256").update(material).digest("hex").slice(0, 16);
 }
 
-/** Strip answer keys from a comprehension pack. */
+/** Strip answer keys (and coding expected outputs) from a comprehension pack. */
 export function publicComprehension(pack: ComprehensionPack | null | undefined) {
   if (!pack) return null;
+  const threshold = Math.min(
+    1,
+    Math.max(MIN_PASS_THRESHOLD, Number(pack.pass_threshold) || MIN_PASS_THRESHOLD)
+  );
   return {
     learner_level: pack.learner_level,
-    pass_threshold: pack.pass_threshold,
+    pass_threshold: threshold,
     generator: pack.generator,
     study_guide: pack.study_guide,
-    questions: pack.questions.map(
-      ({ answer_index: _a, explanation: _e, ...rest }) => rest
-    ),
+    questions: pack.questions.map((q) => {
+      const { answer_index: _a, explanation: _e, tests, ...rest } = q;
+      if (q.question_type === "coding" && Array.isArray(tests)) {
+        return {
+          ...rest,
+          tests: tests.map(({ expected: _exp, ...t }) => ({
+            ...t,
+            has_expected: _exp !== undefined,
+          })),
+        };
+      }
+      return rest;
+    }),
   };
 }
 
@@ -287,7 +305,11 @@ export function gradeComprehension(
   }
 
   const score = total ? correct / total : 0;
-  const threshold = pack.pass_threshold ?? 0.8;
+  // Enforce a floor so ingest cannot set pass_threshold: 0 to auto-pass.
+  const threshold = Math.min(
+    1,
+    Math.max(MIN_PASS_THRESHOLD, Number(pack.pass_threshold) || MIN_PASS_THRESHOLD)
+  );
   return {
     score,
     correct,
@@ -376,7 +398,7 @@ export async function upsertReview(
       updatedAt: now,
     };
     reviews[existingIdx] = updated;
-    await writeReviews(reviews);
+    await writeReviews(reviews.slice(0, MAX_STORED_REVIEWS));
     return updated;
   }
 
@@ -397,7 +419,7 @@ export async function upsertReview(
     comprehension_attempt: null,
   };
   reviews.unshift(review);
-  await writeReviews(reviews);
+  await writeReviews(reviews.slice(0, MAX_STORED_REVIEWS));
   return review;
 }
 
@@ -413,6 +435,28 @@ export async function updateReview(
     ...patch,
     updatedAt: new Date().toISOString(),
   };
-  await writeReviews(reviews);
+  await writeReviews(reviews.slice(0, MAX_STORED_REVIEWS));
+  return reviews[idx];
+}
+
+/**
+ * Apply a patch only when `predicate(current)` is true (reduces approve/merge races).
+ */
+export async function updateReviewConditional(
+  id: string,
+  predicate: (current: Review) => boolean,
+  patch: Partial<Review>
+): Promise<Review | null> {
+  const reviews = await readReviews();
+  const idx = reviews.findIndex((r) => r.id === id);
+  if (idx < 0) return null;
+  const current = reviews[idx];
+  if (!predicate(current)) return null;
+  reviews[idx] = {
+    ...current,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeReviews(reviews.slice(0, MAX_STORED_REVIEWS));
   return reviews[idx];
 }

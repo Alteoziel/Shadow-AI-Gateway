@@ -92,6 +92,10 @@ def _scan_patterns(path: Path, source: str) -> list[Finding]:
             snippet = match.group(0)
             if "your_" in snippet.lower() or "changeme" in snippet.lower() or "xxx" in snippet.lower():
                 continue
+            # Never echo raw secret material into findings / dashboard / PR comments.
+            evidence = snippet
+            if rule_id == "SEC001_HARDCODED_SECRET":
+                evidence = f"{snippet[:24]}…[redacted len={len(snippet)}]"
             findings.append(
                 Finding(
                     step=STEP_ID,
@@ -100,7 +104,7 @@ def _scan_patterns(path: Path, source: str) -> list[Finding]:
                     file=str(path),
                     line=line,
                     rule_id=rule_id,
-                    evidence=snippet[:120],
+                    evidence=evidence[:120],
                     suggestion="Remove secret, use env vars, or sanitize untrusted input.",
                 )
             )
@@ -112,7 +116,21 @@ def _llm_review(diff_text: str) -> list[Finding]:
     api_key = os.getenv("GOVERNANCE_LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
     if not api_key:
         return []
-    base_url = os.getenv("GOVERNANCE_LLM_BASE_URL", "https://api.openai.com/v1")
+    from governance.egress import EgressDeniedError, assert_allowed_llm_base_url
+
+    try:
+        base_url = assert_allowed_llm_base_url(
+            os.getenv("GOVERNANCE_LLM_BASE_URL", "https://api.openai.com/v1")
+        )
+    except EgressDeniedError as exc:
+        return [
+            Finding(
+                step=STEP_ID,
+                severity=Severity.WARNING,
+                message=f"LLM security review blocked by egress policy: {exc}",
+                rule_id="SEC_LLM_EGRESS_DENIED",
+            )
+        ]
     model = os.getenv("GOVERNANCE_LLM_MODEL", "gpt-4o-mini")
 
     payload = {

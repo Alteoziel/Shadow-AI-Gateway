@@ -282,8 +282,34 @@ def test_empty_auth_config_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "not configured" in response.json()["detail"]
 
 
-def test_rate_limit_disabled_when_limit_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rate_limit_requires_explicit_disable_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """limit=0 alone must NOT disable limiting; use GATEWAY_RATE_LIMIT_DISABLED."""
     monkeypatch.setenv("GATEWAY_RATE_LIMIT_PER_MINUTE", "0")
+    monkeypatch.delenv("GATEWAY_RATE_LIMIT_DISABLED", raising=False)
+    clear_settings_cache()
+    reset_rate_limit_state()
+    client = TestClient(create_app())
+    mock_provider = AsyncMock()
+    mock_provider.chat_completion.return_value = {"id": "ok", "choices": []}
+
+    with patch("app.api.v1.chat.OpenAIProvider", return_value=mock_provider):
+        # Falls back to 60/min — five requests must succeed
+        for _ in range(5):
+            response = client.post(
+                "/v1/chat/completions",
+                json=CHAT_PAYLOAD,
+                headers=AUTH_HEADERS,
+            )
+            assert response.status_code == 200
+
+
+def test_rate_limit_disabled_with_explicit_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GATEWAY_RATE_LIMIT_DISABLED", "true")
+    monkeypatch.setenv("GATEWAY_RATE_LIMIT_PER_MINUTE", "1")
     clear_settings_cache()
     reset_rate_limit_state()
     client = TestClient(create_app())
@@ -298,6 +324,14 @@ def test_rate_limit_disabled_when_limit_zero(monkeypatch: pytest.MonkeyPatch) ->
                 headers=AUTH_HEADERS,
             )
             assert response.status_code == 200
+
+
+def test_auth_denied_emits_audit_event() -> None:
+    client = TestClient(create_app())
+    response = client.post("/v1/chat/completions", json=CHAT_PAYLOAD)
+    assert response.status_code == 401
+    event_types = [e.event_type for e in get_audit_sink().events]
+    assert AuditEventType.AUTH_DENIED in event_types
 
 
 def test_rate_limit_prune_drops_old_timestamps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -406,3 +440,109 @@ async def test_anthropic_streaming_connect_error_skips_response_aclose() -> None
         assert exc_info.value.detail["error"] == "upstream_request_error"
     finally:
         await provider.aclose()
+
+
+# --- security hardening additions --------------------------------------------
+
+
+def test_middleware_rejects_oversized_content_length() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/chat/completions",
+        content=b"{}",
+        headers={
+            **AUTH_HEADERS,
+            "Content-Type": "application/json",
+            "Content-Length": str(3 * 1024 * 1024),
+        },
+    )
+    assert response.status_code == 413
+    assert "exceeds" in response.json()["detail"]
+
+
+def test_middleware_rejects_invalid_content_length() -> None:
+    client = TestClient(create_app())
+    response = client.get("/health", headers={"Content-Length": "nope"})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid Content-Length"
+
+
+def test_chat_message_content_bounds() -> None:
+    from app.models.schemas import ChatCompletionRequest, ChatMessage
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ChatMessage(role="user", content="x" * 100_001)
+    with pytest.raises(ValidationError):
+        ChatMessage(role="user", content=[{"t": i} for i in range(201)])
+    with pytest.raises(ValidationError):
+        ChatCompletionRequest(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "ok"}],
+            extra_body={f"k{i}": i for i in range(51)},
+        )
+    # happy path list content
+    msg = ChatMessage(role="user", content=[{"type": "text", "text": "hi"}])
+    assert isinstance(msg.content, list)
+
+
+@pytest.mark.asyncio
+async def test_audit_sink_ring_buffer_drops_oldest() -> None:
+    sink = InMemoryAuditSink(maxlen=2)
+    set_audit_sink(sink)
+    await emit_audit(AuditEventType.AUTH_OK, correlation_id="a")
+    await emit_audit(AuditEventType.AUTH_OK, correlation_id="b")
+    await emit_audit(AuditEventType.AUTH_OK, correlation_id="c")
+    assert len(sink.events) == 2
+    assert sink.events[0].correlation_id == "b"
+    assert sink.events[1].correlation_id == "c"
+    sink.clear()
+    assert sink.events == []
+
+
+def test_correlation_id_falls_back_when_state_missing() -> None:
+    from app.security.auth import _correlation_id
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [],
+        "client": ("127.0.0.1", 123),
+        "server": ("test", 80),
+    }
+    request = Request(scope)
+    cid = _correlation_id(request)
+    assert cid.startswith("corr_")
+
+
+@pytest.mark.asyncio
+async def test_relay_sse_stream_stops_at_byte_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.proxy import streaming as streaming_mod
+    from app.proxy.streaming import relay_sse_stream
+
+    monkeypatch.setattr(streaming_mod, "_MAX_RELAY_BYTES", 4)
+
+    chunks = [b"ab", b"cd", b"ef"]
+
+    async def _aiter_bytes():
+        for c in chunks:
+            yield c
+
+    upstream = AsyncMock()
+    upstream.status_code = 200
+    upstream.headers = {"content-type": "text/event-stream", "x-secret": "nope"}
+    upstream.aiter_bytes = _aiter_bytes
+    upstream.aclose = AsyncMock()
+
+    response = await relay_sse_stream(upstream)
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    assert body == b"abcd"
+    assert "x-secret" not in {k.lower() for k in response.headers.keys()}
+    upstream.aclose.assert_awaited()
