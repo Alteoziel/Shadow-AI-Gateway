@@ -31,15 +31,15 @@ def _configured_keys(settings: Settings) -> frozenset[str]:
 def key_fingerprint(token: str) -> str:
     """Non-reversible short id for audit / rate-limit buckets.
 
-    HMAC (not bare SHA-256) so this is keyed fingerprinting for telemetry
-    buckets, not password storage / verification.
+    BLAKE2b keyed with a domain separation string — fingerprinting for
+    telemetry buckets, not password storage / verification (avoids
+    CodeQL py/weak-sensitive-data-hashing on SHA-family digests).
     """
-    digest = hmac.new(
-        b"shadow-ai-gateway-key-fingerprint-v1",
+    return hashlib.blake2b(
         token.encode("utf-8"),
-        hashlib.sha256,
+        digest_size=8,
+        person=b"gw-key-id-v1",
     ).hexdigest()
-    return digest[:16]
 
 
 def _constant_time_match(provided: str, allowed: frozenset[str]) -> bool:

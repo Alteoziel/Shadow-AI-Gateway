@@ -96,12 +96,18 @@ rules:
     patterns:
       - pattern-either:
           - pattern: |
+              try:
+                  ...
               except:
                   pass
           - pattern: |
+              try:
+                  ...
               except Exception:
                   pass
           - pattern: |
+              try:
+                  ...
               except Exception as $E:
                   pass
     paths:
