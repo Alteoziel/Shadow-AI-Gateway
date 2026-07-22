@@ -15,6 +15,7 @@
 **Checkpoint status:** `blocked_on_human` — Checkpoint #1 (`app/proxy/interceptor.py`)  
 **Pre-merge gate:** AI Governance Engine (Steps 1–7) — `in_progress` (required check on `main`)
 **Task workflow:** **QRSPI is mandatory** — see §5 and [`.cursor/qrspi/`](.cursor/qrspi/)
+**Product posture:** Open-source gateway + paid dashboard; Doppler secrets; BYOK upstream keys; hosting TBD — see §12.9
 
 ---
 
@@ -431,6 +432,7 @@ Separately from QRSPI gates, before a core pillar feature is auto-completed:
 | 2026-07-20 | Advanced Code scanning: tuned `codeql.yml` (`security-extended`, `CodeQL (Layer C)` check name, SARIF upload); removed duplicate CodeQL job from hygiene workflow | Senior Engineer (Grok 4.5) |
 | 2026-07-22 | Added §12 Open-Source Trust — enterprise adoption playbook for AI-assisted code | Senior Engineer (Grok 4.5) |
 | 2026-07-22 | Expanded §12 with AI-specific vulns (phantom deps, silent insecurity), human architecture audit, property-based testing targets, and secure prompt rules | Senior Engineer (Grok 4.5) |
+| 2026-07-22 | Added §12.9 product posture: OSS gateway + paid dashboard, Doppler secrets, BYOK upstream keys, hosting deferred | Senior Engineer (Grok 4.5) |
 
 ---
 
@@ -623,3 +625,28 @@ The Step 6 / Step 7 merge gate (≥80% quiz before Approve & Merge) is not only 
 | Comprehension quiz + CODEOWNERS | Process overhead | Blocks opaque merges; forces understanding + named ownership |
 
 **Bottom line for OSS:** Do not ask companies to “trust the AI.” Ask them to trust the **gates**. If the compliance machine is stricter than their internal bar, AI authorship stops being a blocker.
+
+### 12.9 Product model — open-source gateway, paid dashboard, Doppler, BYOK
+
+This repository is intended to ship as an **open-source security gateway** with a **paid hosted dashboard** (governance / review / quiz / ops UI). The proxy stays self-hostable and auditable; the commercial surface is the managed dashboard and related cloud conveniences — not a closed-source core proxy.
+
+| Layer | License / access posture | Notes |
+|-------|--------------------------|-------|
+| Gateway (`app/`) | Open source (public repo) | Pre-flight proxy; companies can run it in their own network |
+| Governance CLI (`governance/`) | Open source | Merge gates stay visible and forkable |
+| Dashboard (`dashboard/`) | Paid / hosted product | Step 7 review panel, quiz UX, operator workflows; self-host optional later if offered |
+| Compliance machine (CI Layers B–E, CodeQL, etc.) | Open source workflows | Trust story for OSS adopters |
+
+**Secrets: Doppler (no laptop `.env` required).**  
+Operators manage secrets in **Doppler** as the source of truth and sync them into the chosen host (Fly / Render / Vercel / GitHub Actions). The gateway already reads process environment variables via `pydantic-settings` — Doppler replaces `.env` files for cloud-only workflows. Typical Doppler-held values: `GATEWAY_API_KEY`, rate-limit/log config, dashboard secrets, CI ops tokens (e.g. `FOSSA_API_KEY`). Do **not** store customer LLM keys in Doppler as the product default.
+
+**BYOK (bring your own key) for upstream LLMs.**  
+- **`GATEWAY_API_KEY`** — authenticates callers *to this proxy* (Doppler / host secrets).  
+- **OpenAI / Anthropic keys** — belong to the *end user / tenant*; sent per request (e.g. `X-Provider-Api-Key`), never committed, never treated as a shared platform key by default.  
+- Env `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` remain optional fallbacks only if we explicitly offer “platform key” mode later; strict BYOK leaves them unset.  
+- Implementation target: providers use the per-request provider key; do not log it; do not put it in JSON bodies.
+
+**Hosting — deferred.**  
+Phase 1 already ships stubs (`Dockerfile`, `fly.toml`, `render.yaml`). **Final hosting choice is TBD** (Fly vs Render vs later AWS ECS/private VPC in Phase 4). Do not hard-block product work on picking a host; keep the gateway portable (Docker + env vars + Doppler sync). Revisit when traffic, streaming limits, and dashboard coupling are clearer.
+
+**Operator checklist cross-link:** human click-paths for secrets/CI remain in [`SECURITY_OPERATOR_CHECKLIST.md`](SECURITY_OPERATOR_CHECKLIST.md) once merged from the hardening line; until then, treat Doppler + BYOK above as Ledger law for secret design.
